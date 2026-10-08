@@ -376,6 +376,10 @@ button.banner{display:flex;justify-content:space-between;align-items:center;gap:
 .syask{border:2px solid var(--shu);border-radius:10px;padding:10px 14px;margin-top:8px;font-size:.92rem;line-height:1.7}
 .syask p{margin:0 0 4px}
 input.syin{display:block;width:100%;max-width:26em;font:inherit;font-size:1rem;border:1.5px solid var(--line);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--ink)}
+
+/* ---- 出る順番 ---- */
+.chips.ord{align-items:center;margin-bottom:6px}
+.ordl{display:inline-block;min-width:4.2em;font-size:.9rem;color:var(--ink2)}
 </style>
 </head>
 <body>
@@ -415,7 +419,7 @@ const CONTENT = {"units":[{"id":"s5b01","sub":"社会","vol":"5年下","round":1
 <script>
 (function(){
 "use strict";
-const APP_VER="1.6.0";
+const APP_VER="1.6.1";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -433,7 +437,7 @@ const SUBS=["社会","漢字","ことば"].filter(x=>UNITS.some(u=>u.sub===x));
 const KEY="gakushu-v1";            // このアプリの記録
 const OLD_KEY="shakai5b-drill-v1"; // 旧「社会 暗記ドリル」の記録（同じアドレスの下なら読める）
 const SUB_CHUNK={"社会":20,"漢字":10,"ことば":10};
-const DEF={round:ROUNDS[ROUNDS.length-1],cap:30,chunk:20,back:10,goalNew:20,rest:2,sound:true,testDate:"",iv:[1,3,7,14,30,60,120]};
+const DEF={round:ROUNDS[ROUNDS.length-1],cap:30,chunk:20,back:10,goalNew:20,rest:2,rndS:false,rndK:true,rndW:false,sound:true,testDate:"",iv:[1,3,7,14,30,60,120]};
 let S={schema:1,log:[],cfg:{},meta:{},days:{},badges:{},tests:[]}; // log: [id, g(2=○,1=△,0=×), t(ms), src]
 let storageOk=true;
 function cfg(k){const v=S.cfg?S.cfg[k]:null;
@@ -491,6 +495,12 @@ function isPreTest(){const n=daysToTest();return n!=null&&n<=7;}
 function testDateText(t){const d=new Date(t.ms);return (d.getMonth()+1)+"月"+d.getDate()+"日";}
 
 /* ---------- helpers ---------- */
+const RND_KEY={"社会":"rndS","漢字":"rndK","ことば":"rndW"};
+function isRnd(it){const u=UNIT[it.u];return !!(u&&cfg(RND_KEY[u.sub]));}
+/* 「ばらばら」の教科の語だけを、その語どうしの位置で入れかえる。社会など「教科書の順」の語は動かさない。
+   grp を渡すと、同じ組（例：同じ回）の中だけで入れかえる */
+function arrange(list,grp){const g={};list.forEach((it,i)=>{if(!isRnd(it))return;const k=grp?grp(it):"";(g[k]=g[k]||[]).push(i);});
+  const out=list.slice();Object.keys(g).forEach(k=>{const pos=g[k];const sh=shuffle(pos.map(p=>list[p]));pos.forEach((p,n)=>{out[p]=sh[n];});});return out;}
 function shuffle(a){const b=a.slice();for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
 function tag(r){return '<span class="tag r'+r+'">'+esc(ROUND_SHORT[r]||("第"+r+"回"))+'</span>';}
 function utag(it){const u=UNIT[it.u];return '<span class="tag r'+u.round+'">'+esc(u.sub+" "+u.short)+'</span>';}
@@ -533,18 +543,18 @@ function todaySteps(){const steps=[];const chunk=cfg("chunk");const rs="第"+cur
   const ts0=todayStart();const fresh=l=>l.filter(it=>ST[it.id].lastT<ts0);
   const nw=newList(),due=dueList(),weak=fresh(weakList()),quota=reviewQuota(),back=backlogList();
   const sNew=SUBS.map(sub=>{const l=newList(sub);if(!l.length)return null;const n=SUB_CHUNK[sub]||chunk;
-    return {label:sub+" "+rs+"の新しい語を "+Math.min(n,l.length)+"語",sub:"のこり"+l.length+"語。教科書の順に出る",
-      act:()=>startSession(newList(sub).slice(0,n).map(it=>it.id),{src:"new",title:sub+" "+rs+"の新しい語"})};}).filter(Boolean);
+    return {label:sub+" "+rs+"の新しい語を "+Math.min(n,l.length)+"語",sub:"のこり"+l.length+"語。"+(cfg(RND_KEY[sub])?"順番はばらばらに出る":"教科書の順に出る"),
+      act:()=>startSession(arrange(newList(sub)).slice(0,n).map(it=>it.id),{src:"new",title:sub+" "+rs+"の新しい語"})};}).filter(Boolean);
   let sRev=null;
   if(due.length&&quota>0){const n=Math.min(due.length,quota,chunk);
     sRev={label:"今日の復習 "+n+"語",sub:due.length>n?("復習待ちは"+due.length+"語。1日"+cfg("cap")+"語まで、少しずつ進める"):"前に解いた語を、忘れるころにもう一度",
-      act:()=>startSession(dueList().slice(0,Math.min(reviewQuota(),chunk)).map(it=>it.id),{src:"review",title:"今日の復習"})};}
+      act:()=>startSession(arrange(dueList().slice(0,Math.min(reviewQuota(),chunk))).map(it=>it.id),{src:"review",title:"今日の復習"})};}
   const nt0=nextTest();const wName=(isPreTest()&&nt0&&nt0.cycle===0)?"これまでの範囲の弱点":"組分け範囲の弱点";
   const sWeak=weak.length?{label:wName+" "+Math.min(weak.length,chunk)+"語",sub:"印つき"+weak.length+"語から、まちがいの多い順",
-    act:()=>startSession(fresh(weakList()).slice(0,chunk).map(it=>it.id),{src:"weak",title:wName})}:null;
+    act:()=>startSession(arrange(fresh(weakList()).slice(0,chunk)).map(it=>it.id),{src:"weak",title:wName})}:null;
   const nb=cfg("back");const doneBack=todayEntries().filter(a=>a[3]==="back").length;
   const sBack=(back.length&&doneBack<nb)?{label:"前の回のまだ解いていない語を "+Math.min(nb-doneBack,back.length)+"語",sub:"のこり"+back.length+"語。1日"+nb+"語ずつ進める",
-    act:()=>startSession(backlogList().slice(0,Math.max(1,nb-doneBack)).map(it=>it.id),{src:"back",title:"前の回のまだ解いていない語"})}:null;
+    act:()=>startSession(arrange(backlogList(),it=>UNIT[it.u].round).slice(0,Math.max(1,nb-doneBack)).map(it=>it.id),{src:"back",title:"前の回のまだ解いていない語"})}:null;
   (isPreTest()?[sWeak,sRev].concat(sNew,[sBack]):sNew.concat([sRev,sWeak,sBack])).forEach(s=>{if(s)steps.push(s);});
   return {steps,due,quota,nw,weak,back};}
 function renderHome(){const el=$("#tab-home");const t=todaySteps();const dt=daysToTest();const nt=nextTest();
@@ -630,7 +640,7 @@ function renderUnits(){const el=$("#tab-units");
   el.innerHTML=SUBS.map((sub,i)=>'<div class="panel'+(i?" mt":"")+'"><h2>'+esc(sub)+'</h2><div class="rows">'+UNITS.filter(u=>u.sub===sub).map(unitProgress).reverse().map(row).join("")+'</div></div>').join("")
   +'<p class="muted small mt">青＝解答済み、赤＝いま印がついている語。「定着」は、間をあけて3回以上つづけて○になった語。</p>';
   const chunk=cfg("chunk");
-  el.querySelectorAll("[data-un]").forEach(b=>b.addEventListener("click",()=>{const u=b.dataset.un;startSession(ITEMS.filter(it=>it.u===u&&!ST[it.id]).slice(0,chunk).map(it=>it.id),{src:"new",title:UNIT[u].sub+" "+UNIT[u].short+"の未回答"});}));
+  el.querySelectorAll("[data-un]").forEach(b=>b.addEventListener("click",()=>{const u=b.dataset.un;startSession(arrange(ITEMS.filter(it=>it.u===u&&!ST[it.id])).slice(0,chunk).map(it=>it.id),{src:"new",title:UNIT[u].sub+" "+UNIT[u].short+"の未回答"});}));
   el.querySelectorAll("[data-mk]").forEach(b=>b.addEventListener("click",()=>{const u=b.dataset.mk;startSession(shuffle(ITEMS.filter(it=>it.u===u&&isMarked(ST[it.id]))).slice(0,chunk).map(it=>it.id),{src:"weak",title:UNIT[u].sub+" "+UNIT[u].short+"の印つき"});}));
   el.querySelectorAll("[data-all]").forEach(b=>b.addEventListener("click",()=>{const u=b.dataset.all;startSession(shuffle(ITEMS.filter(it=>it.u===u)).slice(0,chunk).map(it=>it.id),{src:"free",title:UNIT[u].sub+" "+UNIT[u].short+"から20問"});}));}
 
@@ -690,6 +700,7 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   h+='<div class="panel mt"><h2>紙のテストでまちがえた語に印をつける</h2><input type="search" id="nSearch" placeholder="語句や読みで さがす（例：しゅご）" value="'+esc(nt.q)+'"><div id="nFound"></div></div>';
   h+=testPanelHtml();
   h+='<div class="panel mt"><h2>設定</h2><div class="lbl">今週の回（新しい語を出す回）</div><div class="chips">'+ROUNDS.slice().reverse().map(r=>'<button class="chip'+(r===curRound()?" on":"")+'" data-round="'+r+'">第'+r+'回</button>').join("")+'</div>'
+    +'<div class="lbl">出る順番（新しい語・復習・弱点）</div>'+SUBS.map(sub=>'<div class="chips ord"><span class="ordl">'+esc(sub)+'</span>'+[[0,"教科書の順"],[1,"ばらばら"]].map(x=>'<button class="chip'+(!!cfg(RND_KEY[sub])===!!x[0]?" on":"")+'" data-rnd="'+RND_KEY[sub]+'" data-v="'+x[0]+'">'+x[1]+'</button>').join("")+'</div>').join("")
     +'<div class="lbl">新しい語の輪の目標（1日）</div><div class="chips">'+[10,20,30].map(n=>'<button class="chip'+(cfg("goalNew")===n?" on":"")+'" data-goal="'+n+'">'+n+'語</button>').join("")+'</div>'
     +'<div class="lbl">1日の復習の上限（復習の輪の目標）</div><div class="chips">'+[20,30,40,50].map(n=>'<button class="chip'+(cap===n?" on":"")+'" data-cap="'+n+'">'+n+'語</button>').join("")+'</div>'
     +'<div class="lbl">積み上げの輪の目標（1日）</div><div class="chips">'+[5,10,15,20].map(n=>'<button class="chip'+(cfg("back")===n?" on":"")+'" data-back="'+n+'">'+n+'語</button>').join("")+'</div>'
@@ -712,6 +723,7 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   el.querySelectorAll("[data-sound]").forEach(b=>b.addEventListener("click",()=>{setCfg("sound",b.dataset.sound==="1");if(cfg("sound"))sfx("ding");render();}));
   el.querySelectorAll("[data-goal]").forEach(b=>b.addEventListener("click",()=>{setCfg("goalNew",Number(b.dataset.goal));render();}));
   el.querySelectorAll("[data-cap]").forEach(b=>b.addEventListener("click",()=>{setCfg("cap",Number(b.dataset.cap));render();}));
+  el.querySelectorAll("[data-rnd]").forEach(b=>b.addEventListener("click",()=>{setCfg(b.dataset.rnd,b.dataset.v==="1");renderNotesKeep();}));
   $("#nTest").addEventListener("change",e=>{setCfg("testDate",e.target.value||"");render();});
   $("#nOut").value=exportText();
   $("#nCopy").addEventListener("click",()=>{const ta=$("#nOut");const done=()=>{S.meta.lastExport=Date.now();save();$("#nCopyMsg").textContent="コピーしました。メモやメールに貼りつけて保管してください。";};
@@ -995,13 +1007,14 @@ function renderNotesKeep(){const y=window.scrollY;renderNotes();window.scrollTo(
    形：1＝答えをかくす（書きこみ用） 0＝答えつき 2＝答えと解説つき
 ====================================================== */
 const sheet=document.createElement("div");sheet.id="sheet";sheet.setAttribute("aria-label","印刷用シート");document.body.appendChild(sheet);
-const SH={mode:1,scope:"mark"};
+const SH={mode:1,scope:"mark",rk:{}};
+function sheetKey(it,idx){if(!isRnd(it))return idx[it.id];if(SH.rk[it.id]==null)SH.rk[it.id]=Math.random();return SH.rk[it.id];}
 function sheetItems(scope){const idx={};ITEMS.forEach((it,i)=>{idx[it.id]=i;});let l;
   if(scope==="kanji")l=kanjiList();else if(scope==="round"){const r=curRound();l=ITEMS.filter(it=>UNIT[it.u].round===r);}else l=ITEMS.filter(it=>isMarked(ST[it.id]));
-  return l.slice().sort((a,b)=>SUBS.indexOf(UNIT[a.u].sub)-SUBS.indexOf(UNIT[b.u].sub)||UNIT[a.u].round-UNIT[b.u].round||idx[a.id]-idx[b.id]);}
+  return l.slice().sort((a,b)=>SUBS.indexOf(UNIT[a.u].sub)-SUBS.indexOf(UNIT[b.u].sub)||UNIT[a.u].round-UNIT[b.u].round||sheetKey(a,idx)-sheetKey(b,idx));}
 function sheetBlanks(it){if(it.k==="kanji"||it.k==="kana"){let h="";it.a.replace(/[『』「」]/g,"").split("").forEach(c=>{h+=(c==="＝"||c==="・")?esc(c):'<span class="bx"></span>';});return h+(it.s?" "+esc(it.s):"");}
   return '<span class="line"></span>';}
-function openSheet(){buildSheet();sheet.classList.add("show");document.body.style.overflow="hidden";sheet.scrollTop=0;}
+function openSheet(){SH.rk={};buildSheet();sheet.classList.add("show");document.body.style.overflow="hidden";sheet.scrollTop=0;}
 function closeSheet(){sheet.classList.remove("show");document.body.style.overflow="";}
 function buildSheet(){const hide=SH.mode===1,withE=SH.mode===2;const d=new Date();const date=d.getFullYear()+"年"+(d.getMonth()+1)+"月"+d.getDate()+"日";
   const n={mark:sheetItems("mark").length,kanji:sheetItems("kanji").length,round:sheetItems("round").length};const list=sheetItems(SH.scope);
@@ -1272,7 +1285,7 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden)reconcile()
 window.addEventListener("pagehide",()=>reconcile());
 window.addEventListener("online",syncWake);window.addEventListener("offline",()=>paintSync());
 syncStart();
-window.__drill={sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
+window.__drill={arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
 })();
 
 </script>
