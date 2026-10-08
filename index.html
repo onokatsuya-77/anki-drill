@@ -368,6 +368,14 @@ button.banner{display:flex;justify-content:space-between;align-items:center;gap:
   .paper h2{break-after:avoid}
   .paper tr{break-inside:avoid}
 }
+
+/* ---- 同期 ---- */
+.sync{font-size:.8rem;color:var(--ink2);white-space:nowrap}
+.sync:empty{display:none}
+.sync.bad,#syStat.bad{color:var(--shu);font-weight:700}
+.syask{border:2px solid var(--shu);border-radius:10px;padding:10px 14px;margin-top:8px;font-size:.92rem;line-height:1.7}
+.syask p{margin:0 0 4px}
+input.syin{display:block;width:100%;max-width:26em;font:inherit;font-size:1rem;border:1.5px solid var(--line);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--ink)}
 </style>
 </head>
 <body>
@@ -376,7 +384,7 @@ button.banner{display:flex;justify-content:space-between;align-items:center;gap:
     <div class="top">
       <div class="brand">
         <h1>暗記ドリル</h1>
-        <div class="meta"><span class="range" id="hdRange"></span><span class="counts"><span class="un">新しい語 <b id="cntNew">0</b></span><span class="mk">復習 <b id="cntDue">0</b></span><span>今日 <b id="cntToday">0</b>問</span></span></div>
+        <div class="meta"><span class="range" id="hdRange"></span><span class="counts"><span class="un">新しい語 <b id="cntNew">0</b></span><span class="mk">復習 <b id="cntDue">0</b></span><span>今日 <b id="cntToday">0</b>問</span></span><span class="sync" id="hdSync"></span></div>
       </div>
     </div>
     <nav class="tabs" role="tablist">
@@ -407,7 +415,7 @@ const CONTENT = {"units":[{"id":"s5b01","sub":"社会","vol":"5年下","round":1
 <script>
 (function(){
 "use strict";
-const APP_VER="1.5.0";
+const APP_VER="1.6.0";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -431,9 +439,9 @@ let storageOk=true;
 function cfg(k){const v=S.cfg?S.cfg[k]:null;
   if(k==="round"){if(v!=null&&ROUNDS.includes(Number(v)))return Number(v);const u=S.cfg?S.cfg.unit:null;if(u&&UNIT[u])return UNIT[u].round;return DEF.round;}
   return v==null?DEF[k]:v;}
-function setCfg(k,v){S.cfg[k]=v;save();}
+function setCfg(k,v){S.cfg[k]=v;(S.meta.cfgT=S.meta.cfgT||{})[k]=Date.now();save();}
 function load(){try{const raw=localStorage.getItem(KEY);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.log)){S.log=o.log;S.cfg=o.cfg||{};S.meta=o.meta||{};S.days=o.days||{};S.badges=o.badges||{};S.tests=Array.isArray(o.tests)?o.tests:[];}}}catch(e){storageOk=false;}}
-function save(){try{if(S.log.length>20000)S.log=S.log.slice(-20000);localStorage.setItem(KEY,JSON.stringify(S));storageOk=true;}catch(e){storageOk=false;}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));storageOk=true;}catch(e){storageOk=false;}syncSoon();}
 function mapLegacyId(id){const m=/^q([1-5])-(\d\d)$/.exec(id);return m?("s5b0"+m[1]+"-0"+m[2]):id;}
 function mergeEntries(list,legacy){const seen=new Set(S.log.map(a=>a[0]+"|"+a[2]));let added=0;
   list.forEach(a=>{if(!Array.isArray(a)||a.length<3)return;let id=String(a[0]);const t=Number(a[2]);if(!t||!isFinite(t))return;let g;
@@ -665,7 +673,7 @@ function renderTips(){const el=$("#tab-tips");const f=view.tips.r;const list=TIP
    ノート（弱点・設定・保存）
 ====================================================== */
 function itemRow(it,i){const s=ST[it.id]||{w:0,c:0,k:0};return '<li><span class="num">'+(i+1)+'</span><div class="body"><div class="qq">'+utag(it)+' '+esc(it.q)+'</div><div class="aa">'+esc(fullAns(it))+(it.y?' <span class="yomi-in">'+esc(it.y)+'</span>':"")+'</div></div><span class="st">'+(s.w?'<span class="badge w">×'+s.w+'</span>':"")+(s.k?' <span class="badge t">△'+s.k+'</span>':"")+(s.c?' <span class="badge c">○'+s.c+'</span>':"")+'</span></li>';}
-function exportText(){return JSON.stringify({app:"gakushu",schema:1,ver:APP_VER,exportedAt:new Date().toISOString(),log:S.log,cfg:S.cfg,days:S.days,badges:S.badges,badgeFrom:S.meta.badgeFrom||0,tests:S.tests});}
+function exportText(){return JSON.stringify({app:"gakushu",schema:1,ver:APP_VER,exportedAt:new Date().toISOString(),log:S.log,cfg:S.cfg,days:S.days,badges:S.badges,badgeFrom:S.meta.badgeFrom||0,tests:S.tests,testDel:S.meta.testDel||{}});}
 function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   const done=ITEMS.filter(it=>ST[it.id]).length;const marked=ITEMS.filter(it=>isMarked(ST[it.id])).sort((a,b)=>ST[b.id].w-ST[a.id].w||ST[b.id].lastT-ST[a.id].lastT);const kj=kanjiList();
   const ts=todayStart();let dueT=0,due1=0,due7=0;const stages=cfg("iv").map(()=>0);
@@ -689,12 +697,13 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
     +'<div class="lbl">バッジの音</div><div class="chips">'+[[1,"あり"],[0,"なし"]].map(x=>'<button class="chip'+(!!cfg("sound")===!!x[0]?" on":"")+'" data-sound="'+x[0]+'">'+x[1]+'</button>').join("")+'</div>'
     +'<div class="lbl">テストの日程（7日前から弱点を先に出す）</div><ul class="tests">'+testList().map(x=>'<li class="'+(x.days<0?"past":"")+'"><b>'+(new Date(x.ms).getFullYear())+'年'+testDateText(x)+'</b>　'+esc(x.name)+(x.days>=0?'　<span class="muted small">'+(x.days===0?"今日":"あと"+x.days+"日")+'</span>':'　<span class="muted small">終了</span>')+'</li>').join("")+'</ul>'
     +'<div class="lbl">ほかのテストの日を足す（なければ空のまま）</div><input type="date" id="nTest" value="'+esc(cfg("testDate"))+'"></div>';
-  h+='<div class="panel mt"><h2>記録の保存・読み込み</h2><p class="muted small">記録はこの端末のブラウザの中だけにあります。週に1回、「記録をコピー」して保管してください。'+(le?"前回のコピー："+fmtDate(le):"まだコピーしていません")+'</p>'
+  h+='<div class="panel mt" id="syBox"></div>';
+  h+='<div class="panel mt"><h2>記録の保存・読み込み</h2><p class="muted small">'+(SY.user?"ログイン中は、記録はクラウドにも保存されます。念のため、月に1回は「記録をコピー」して保管してください。":"記録はこの端末のブラウザの中だけにあります。週に1回、「記録をコピー」して保管してください。")+(le?"前回のコピー："+fmtDate(le):"まだコピーしていません")+'</p>'
     +'<div class="row mt"><button class="btn sm primary" id="nCopy">記録をコピー</button><span class="muted small" id="nCopyMsg"></span></div><textarea id="nOut" class="mt" readonly aria-label="記録の文字"></textarea>'
     +'<div class="lbl">ほかの端末や、前のドリルの記録を読み込む</div><textarea id="nIn" placeholder="コピーした記録の文字を、ここに貼りつける" aria-label="読み込む記録"></textarea>'
     +'<div class="row mt"><button class="btn sm" id="nLoad">読み込んで合わせる</button><span class="muted small" id="nLoadMsg">'+esc(nt.msg)+'</span></div></div>';
   h+='<p class="muted small mt" style="text-align:center">暗記ドリル '+APP_VER+'　記録 '+S.log.length+'件</p>';
-  el.innerHTML=h;nt.msg="";
+  el.innerHTML=h;nt.msg="";paintSync(true);
   $("#nKanji").addEventListener("click",startKanji);
   el.querySelectorAll("[data-round]").forEach(b=>b.addEventListener("click",()=>{setCfg("round",Number(b.dataset.round));render();}));
   $("#nPrint").addEventListener("click",()=>openSheet());bindTestPanel(el);
@@ -818,7 +827,10 @@ function newBadgeBanner(id){const names=newBadgeNames();if(!names.length)return 
 function mergeExtras(o){let ch=false;
   if(o.days&&typeof o.days==="object")Object.keys(o.days).forEach(k=>{if(/^\d{4}-\d\d-\d\d$/.test(k)&&o.days[k]&&!S.days[k]){S.days[k]=1;ch=true;}});
   if(o.badges&&typeof o.badges==="object")Object.keys(o.badges).forEach(k=>{const t=Number(o.badges[k]);if(t&&isFinite(t)&&(!S.badges[k]||t<S.badges[k])){S.badges[k]=t;ch=true;}});
-  if(Array.isArray(o.tests))o.tests.forEach(t=>{if(!t||!t.id||!/^\d{4}-\d\d-\d\d$/.test(String(t.d))||S.tests.some(x=>x.id===String(t.id)))return;const sc={};
+  const td=S.meta.testDel=S.meta.testDel||{};
+  if(o.testDel&&typeof o.testDel==="object"&&!Array.isArray(o.testDel)){Object.keys(o.testDel).forEach(id=>{if(!td[id]){td[id]=Number(o.testDel[id])||1;ch=true;}});
+    const n0=S.tests.length;S.tests=S.tests.filter(t=>!td[t.id]);if(S.tests.length!==n0)ch=true;}
+  if(Array.isArray(o.tests))o.tests.forEach(t=>{if(!t||!t.id||td[String(t.id)]||!/^\d{4}-\d\d-\d\d$/.test(String(t.d))||S.tests.some(x=>x.id===String(t.id)))return;const sc={};
     TSUB.forEach(x=>{const v=t.sc?Number(t.sc[x[0]]):NaN;if(t.sc&&t.sc[x[0]]!=null&&isFinite(v))sc[x[0]]=v;});
     S.tests.push({id:String(t.id),d:String(t.d),kind:t.kind==="k"?"k":"w",no:(t.no==null||!isFinite(Number(t.no)))?null:Number(t.no),sc,cls:/^[SCBA]$/.test(String(t.cls))?String(t.cls):""});ch=true;});
   const f=Number(o.badgeFrom);if(f&&isFinite(f)&&(!S.meta.badgeFrom||f<S.meta.badgeFrom)){S.meta.badgeFrom=f;ch=true;}
@@ -964,7 +976,7 @@ function bindTestPanel(el){const f=view.tf;
   el.querySelectorAll("[data-tc]").forEach(b=>b.addEventListener("click",()=>{readTf();f.cls=f.cls===b.dataset.tc?"":b.dataset.tc;f.msg="";renderNotesKeep();}));
   el.querySelectorAll("[data-tdel]").forEach(b=>b.addEventListener("click",()=>{readTf();const id=b.dataset.tdel;
     if(f.del!==id){f.del=id;f.msg="";renderNotesKeep();return;}
-    S.tests=S.tests.filter(t=>t.id!==id);f.del=null;f.err=false;f.msg="消しました。";checkBadges();fxIds=fxIds.filter(x=>!/^(wb|ks):/.test(x));save();renderNotesKeep();}));
+    S.tests=S.tests.filter(t=>t.id!==id);(S.meta.testDel=S.meta.testDel||{})[id]=Date.now();f.del=null;f.err=false;f.msg="消しました。";checkBadges();fxIds=fxIds.filter(x=>!/^(wb|ks):/.test(x));save();renderNotesKeep();}));
   const add=$("#tAdd");if(add)add.addEventListener("click",()=>{readTf();f.del=null;f.err=true;
     const d=f.d||dayKey(Date.now());if(!/^\d{4}-\d\d-\d\d$/.test(d)){f.msg="テストの日を入れてください。";renderNotesKeep();return;}
     const sc={};let bad=false,n=0;TSUB.forEach(x=>{const raw=String(f[x[0]]==null?"":f[x[0]]).trim();if(raw==="")return;const v=Number(raw);if(!isFinite(v)||v<0||v>999||Math.floor(v)!==v){bad=true;return;}sc[x[0]]=v;n++;});
@@ -1079,6 +1091,169 @@ function renderMockResult(m){const el=$("#tab-mock");const k=view.mock;const qs=
     +'<div class="row mt2"><button class="btn primary" id="kAgain">模擬テストの一覧へ</button><button class="btn" id="kHome2">きょうの画面へ</button></div></div>';
   $("#kAgain").addEventListener("click",()=>{k.mode="intro";scrollTop();renderMock();});$("#kHome2").addEventListener("click",()=>switchTab("home"));}
 
+/* ======================================================
+   端末どうしの同期（Firebase：ログイン + Firestore）
+   ・この端末の記録（localStorage）が正本。Firebaseが使えなくてもドリルは動く。
+   ・クラウドは「ログインした全端末の記録を合わせたもの」。解答の記録は足すだけで消さない。
+   ・設定は、あとから変えたほうを採用する。
+   ・保存場所  users/{uid}/log/{年-月}   … e: 解答1件を1つの文字にした配列
+               users/{uid}/state/main    … 設定・輪の日・バッジ・テストの点数
+====================================================== */
+const FB_CONFIG={apiKey:"AIzaSyBG_tnNafzVao3_jThXLHY0XbjMSv7OHBk",authDomain:"anki-drill.firebaseapp.com",projectId:"anki-drill",storageBucket:"anki-drill.firebasestorage.app",messagingSenderId:"629552548443",appId:"1:629552548443:web:7da5f23c9d235db6824d7e"};
+const FB_BASE="https://www.gstatic.com/firebasejs/12.19.0/";
+/* Firebase とのやりとりは、この中だけ */
+function fbBackend(){let U,F,auth,db;
+  return {
+    init(){const imp=new Function("u","return import(u)");
+      return Promise.all([imp(FB_BASE+"firebase-app.js"),imp(FB_BASE+"firebase-auth.js"),imp(FB_BASE+"firebase-firestore.js")]).then(m=>{U=m[1];F=m[2];const app=m[0].initializeApp(FB_CONFIG);auth=U.getAuth(app);db=F.getFirestore(app);});},
+    onAuth(cb){U.onAuthStateChanged(auth,u=>cb(u?{uid:u.uid,email:u.email||""}:null),()=>cb(null));},
+    signIn(mail,pw){return U.signInWithEmailAndPassword(auth,mail,pw);},
+    signOut(){return U.signOut(auth);},
+    watch(uid,h){const o={includeMetadataChanges:true};
+      const u1=F.onSnapshot(F.collection(db,"users",uid,"log"),o,sn=>{const l=[];sn.docChanges().forEach(c=>{const d=c.type==="removed"?{}:(c.doc.data()||{});l.push({m:c.doc.id,e:Array.isArray(d.e)?d.e:[]});});h.onLogs(l,!!sn.metadata.fromCache);},h.onError);
+      const u2=F.onSnapshot(F.doc(db,"users",uid,"state","main"),o,sn=>{h.onState(sn.exists()?sn.data():null,!!sn.metadata.fromCache);},h.onError);
+      return ()=>{u1();u2();};},
+    pushLog(uid,m,strs){return F.setDoc(F.doc(db,"users",uid,"log",m),{e:F.arrayUnion.apply(null,strs),u:F.serverTimestamp()},{merge:true});},
+    pushState(uid,d){return F.setDoc(F.doc(db,"users",uid,"state","main"),Object.assign({u:F.serverTimestamp()},d),{merge:true});}
+  };}
+
+const SY={be:null,loading:false,st:"idle",user:null,err:"",unsub:null,cl:{},cs:null,logOk:false,stOk:false,sent:new Set(),sentState:"",pend:0,timer:null,last:0,outAsk:false,hold:null,agree:false};
+const SY_DERIVED=/^(wb|ks):/;   // テストの点数から作り直すバッジは送らない
+const SY_CACHE=new WeakMap();
+function entInfo(a){let x=SY_CACHE.get(a);if(!x){let m="0000-00";try{m=new Date(a[2]).toISOString().slice(0,7);}catch(e){}
+  x={s:JSON.stringify([String(a[0]),a[1],a[2],String(a[3]||"")]),m};SY_CACHE.set(a,x);}return x;}
+function errCode(e){return String((e&&(e.code||e.message))||e||"error").slice(0,80);}
+function hm(t){const d=new Date(t);return d.getHours()+":"+pad2(d.getMinutes());}
+function cfgOk(k,v){if(k==="unit")return typeof v==="string";if(!Object.prototype.hasOwnProperty.call(DEF,k))return false;
+  if(Array.isArray(DEF[k]))return Array.isArray(v)&&v.length>0&&v.length<=12&&v.every(n=>typeof n==="number"&&isFinite(n)&&n>0);
+  return typeof v===typeof DEF[k]&&(typeof v!=="number"||isFinite(v));}
+
+/* クラウドの設定・バッジなどを、この端末に合わせる。変化があれば true */
+function mergeState(c){let ch=false;const ct=(c.cfgT&&typeof c.cfgT==="object")?c.cfgT:{};const lt=S.meta.cfgT=S.meta.cfgT||{};
+  if(c.cfg&&typeof c.cfg==="object")Object.keys(c.cfg).forEach(k=>{const v=c.cfg[k];if(!cfgOk(k,v))return;const a=Number(ct[k])||0;
+    const b=Object.prototype.hasOwnProperty.call(S.cfg,k)?(lt[k]||1):0;
+    if(a>b||(a===b&&JSON.stringify(S.cfg[k])!==JSON.stringify(v))){S.cfg[k]=v;lt[k]=a;ch=true;}});
+  const bd={};if(c.badges&&typeof c.badges==="object")Object.keys(c.badges).forEach(k=>{if(!SY_DERIVED.test(k))bd[k]=c.badges[k];});
+  const tl=[];if(c.tests&&typeof c.tests==="object")Object.keys(c.tests).forEach(id=>{const t=c.tests[id];if(t&&typeof t==="object")tl.push(Object.assign({},t,{id:id}));});
+  if(mergeExtras({days:c.days,badges:bd,tests:tl,testDel:c.testDel,badgeFrom:c.badgeFrom}))ch=true;
+  return ch;}
+/* この端末にあって、クラウドにないもの */
+function stateDiff(){const c=SY.cs||{};const d={};let n=0;
+  const cc=c.cfg||{},ct=c.cfgT||{},lt=S.meta.cfgT||{};
+  Object.keys(S.cfg).forEach(k=>{const v=S.cfg[k];if(!cfgOk(k,v))return;const b=lt[k]||1;const a=Object.prototype.hasOwnProperty.call(cc,k)?(Number(ct[k])||0):-1;
+    if(b>a){(d.cfg=d.cfg||{})[k]=v;(d.cfgT=d.cfgT||{})[k]=b;n++;}});
+  const cd=c.days||{};Object.keys(S.days).forEach(k=>{if(S.days[k]&&!cd[k]){(d.days=d.days||{})[k]=1;n++;}});
+  const cb=c.badges||{};Object.keys(S.badges).forEach(k=>{if(SY_DERIVED.test(k))return;const t=S.badges[k];if(!t)return;if(!cb[k]||t<cb[k]){(d.badges=d.badges||{})[k]=t;n++;}});
+  const cdel=c.testDel||{},td=S.meta.testDel||{};Object.keys(td).forEach(id=>{if(!cdel[id]){(d.testDel=d.testDel||{})[id]=td[id];n++;}});
+  const cts=c.tests||{};S.tests.forEach(t=>{if(!cts[t.id]){const o={d:t.d,kind:t.kind,no:t.no==null?null:t.no,cls:t.cls||""};if(t.sc&&Object.keys(t.sc).length)o.sc=t.sc;(d.tests=d.tests||{})[t.id]=o;n++;}});
+  const bf=S.meta.badgeFrom;if(bf&&(!c.badgeFrom||bf<c.badgeFrom)){d.badgeFrom=bf;n++;}
+  return n?d:null;}
+
+/* ほかの端末の記録が届いたあと。演出（メダル・音）は出さない */
+function afterRemote(){const ids=fxIds.slice(),rg=fxRing;rebuild();checkBadges();fxIds=ids;fxRing=rg;save();softRender();}
+function softRender(){if(view.sess){updateCounts();return;}if(CE.open)return;
+  const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;
+  if((view.tab==="mock"&&view.mock.mode!=="intro")||(view.tab==="order"&&view.order.mode!=="list"))return;
+  const y=window.scrollY;render();window.scrollTo(0,y);}
+
+function syncStart(){if(SY.be||SY.loading)return;SY.loading=true;SY.st="load";SY.err="";paintSync();
+  let be;try{be=window.__cloudBackend?window.__cloudBackend():fbBackend();}catch(e){SY.loading=false;SY.st="off";SY.err=errCode(e);paintSync();return;}
+  Promise.resolve().then(()=>be.init()).then(()=>{SY.be=be;SY.loading=false;be.onAuth(syncAuth);},e=>{SY.loading=false;SY.st="off";SY.err=errCode(e);paintSync();});}
+function syncStop(){if(SY.unsub){try{SY.unsub();}catch(e){}}SY.unsub=null;clearTimeout(SY.timer);SY.cl={};SY.cs=null;SY.logOk=false;SY.stOk=false;SY.sent=new Set();SY.sentState="";SY.hold=null;SY.agree=false;}
+function syncAuth(u){syncStop();SY.user=u||null;SY.err="";SY.outAsk=false;SY.st=u?"in":"out";
+  if(u)syncWatch();
+  paintSync(true);softRender();}
+function syncWatch(){if(!SY.be||!SY.user||SY.unsub)return;SY.err="";const uid=SY.user.uid;const live=()=>SY.user&&SY.user.uid===uid;
+  SY.unsub=SY.be.watch(uid,{
+    onLogs(list,fromCache){if(!live())return;const fresh=[];
+      (list||[]).forEach(x=>{const old=SY.cl[x.m];const set=new Set();(x.e||[]).forEach(s=>{if(typeof s!=="string")return;set.add(s);if(!old||!old.has(s)){try{fresh.push(JSON.parse(s));}catch(e){}}});SY.cl[x.m]=set;});
+      SY.logOk=!fromCache;if(S.meta.syncOn&&fresh.length&&mergeEntries(fresh,false))afterRemote();
+      syncSoon(300);paintSync();},
+    onState(data,fromCache){if(!live())return;SY.cs=data||{};SY.stOk=!fromCache;if(S.meta.syncOn&&mergeState(SY.cs))afterRemote();
+      syncSoon(300);paintSync();},
+    onError(e){if(!live())return;const u=SY.unsub;SY.unsub=null;if(u){try{u();}catch(_){}}SY.logOk=false;SY.stOk=false;SY.err=errCode(e);paintSync();}
+  });paintSync();}
+function syncSoon(ms){if(!SY.user||!SY.unsub)return;clearTimeout(SY.timer);SY.timer=setTimeout(reconcile,ms==null?2500:ms);}
+function localOnly(){const out=[];for(const a of S.log){const x=entInfo(a);const c=SY.cl[x.m];if(!(c&&c.has(x.s)))out.push(x);}return out;}
+function cloudCount(){let n=0;Object.keys(SY.cl).forEach(m=>{n+=SY.cl[m].size;});return n;}
+/* クラウドの中身を、まとめてこの端末に取りこむ（この端末をはじめて合わせるとき） */
+function pullAll(){const fresh=[];Object.keys(SY.cl).forEach(m=>SY.cl[m].forEach(s=>{try{fresh.push(JSON.parse(s));}catch(e){}}));
+  let ch=mergeEntries(fresh,false)>0;if(mergeState(SY.cs||{}))ch=true;if(ch)afterRemote();else save();}
+/* この端末にあってクラウドにない記録を送る。クラウドの中身を受け取ってからでないと送らない。
+   はじめて合わせる端末に記録があるときは、送る前に確かめる（ためしに解いた記録が混ざるのを防ぐ） */
+function reconcile(){clearTimeout(SY.timer);if(!SY.be||!SY.user||!SY.unsub||!SY.logOk||!SY.stOk)return;const uid=SY.user.uid;
+  let lo=localOnly();
+  if(!S.meta.syncOn){if(lo.length&&!SY.agree){SY.hold={n:lo.length,c:cloudCount()};paintSync();return;}
+    SY.hold=null;SY.agree=false;S.meta.syncOn=1;pullAll();lo=localOnly();}
+  const by={};lo.forEach(x=>{if(!SY.sent.has(x.s))(by[x.m]=by[x.m]||[]).push(x.s);});
+  Object.keys(by).forEach(m=>{const all=by[m];for(let i=0;i<all.length;i+=1500){const part=all.slice(i,i+1500);part.forEach(s=>SY.sent.add(s));
+    syncPush(()=>SY.be.pushLog(uid,m,part),()=>part.forEach(s=>SY.sent.delete(s)));}});
+  const d=stateDiff();if(d){const sig=JSON.stringify(d);if(sig!==SY.sentState){SY.sentState=sig;syncPush(()=>SY.be.pushState(uid,d),()=>{SY.sentState="";});}}
+  if(!SY.pend)SY.last=Date.now();paintSync();}
+function syncPush(run,undo){SY.pend++;let p;try{p=Promise.resolve(run());}catch(e){p=Promise.reject(e);}
+  p.then(()=>{SY.pend--;SY.last=Date.now();SY.err="";paintSync();},e=>{SY.pend--;undo();SY.err=errCode(e);paintSync();});}
+
+/* ---- 画面 ---- */
+function syncErrText(code){
+  if(/permission-denied/.test(code))return "データベースの規則で止められました。Firebaseの「ルール」の文面を確かめてください。（permission-denied）";
+  if(/unavailable|network/.test(code))return "インターネットにつながっていません。記録はこの端末に保存され、つながったときに送られます。";
+  if(/resource-exhausted/.test(code))return "今日の無料の利用枠をこえました。あしたになると、また同期されます。（resource-exhausted）";
+  return "同期できません。（"+code+"）";}
+function loginErrText(code){
+  if(/invalid-credential|wrong-password|user-not-found|invalid-email|missing-password/.test(code))return "メールアドレスかパスワードがちがいます。";
+  if(/too-many-requests/.test(code))return "まちがいが続いたため、しばらくログインできません。時間をおいてください。";
+  if(/network/.test(code))return "インターネットにつながっていません。";
+  if(/operation-not-allowed/.test(code))return "Firebaseで「メール／パスワード」のログインが有効になっていません。";
+  if(/user-disabled/.test(code))return "このユーザーは、Firebaseで止められています。";
+  return "ログインできません。（"+code+"）";}
+function syncText(){const off=(typeof navigator!=="undefined"&&navigator.onLine===false);
+  const OFF="インターネットにつながっていません。記録はこの端末に保存され、つながったときに送られます。";
+  if(SY.st==="idle"||SY.st==="load")return {t:"同期の準備をしています…",s:""};
+  if(SY.st==="off")return {t:off?OFF:"同期の部品を読み込めませんでした。インターネットにつながっているか確かめて、「読み込み直す」をおしてください。（"+SY.err+"）",s:"オフライン",bad:!off};
+  if(!SY.user)return {t:"",s:S.meta.syncOn?"同期が止まっています（ノートでログイン）":"",bad:true};
+  if(SY.err&&!SY.unsub)return {t:syncErrText(SY.err),s:"同期できません",bad:true};
+  if(!(SY.logOk&&SY.stOk))return off?{t:OFF,s:"オフライン"}:{t:"クラウドにつないでいます…",s:"同期中…"};
+  if(SY.hold)return {t:"",s:"同期の確認待ち（ノート）",bad:true};
+  if(SY.err)return {t:syncErrText(SY.err),s:"同期できません",bad:true};
+  if(SY.pend)return {t:"記録を送っています…",s:"同期中…"};
+  return {t:"同期ずみ（"+hm(SY.last||Date.now())+"）",s:"同期ずみ"};}
+function syncPanelHtml(mode){let h='<h2>端末どうしの同期</h2>';
+  if(mode==="out")return h+'<p class="muted small">ログインすると、この端末の記録がクラウドにも保存され、ログインしたほかの端末と同じ記録になります。ログインは端末ごとに1回だけです。</p>'
+    +'<div class="lbl">メールアドレス</div><input type="email" id="syMail" class="syin" autocomplete="username" autocapitalize="off" spellcheck="false" inputmode="email">'
+    +'<div class="lbl">パスワード</div><input type="password" id="syPw" class="syin" autocomplete="current-password">'
+    +'<div class="row mt"><button class="btn sm primary" id="syIn">ログイン</button><span class="small" id="syStat" role="status"></span></div>';
+  if(mode==="hold")return h+'<p class="small">ログイン中：<b>'+esc(SY.user.email||"")+'</b></p>'
+    +'<div class="syask"><p><b>この端末にだけある記録が <span id="syHn">'+SY.hold.n+'</span>件あります</b>（クラウドの記録は <span id="syHc">'+SY.hold.c+'</span>件）。</p><p>この記録をクラウドに送って、ほかの端末と合わせますか？　合わせた記録は、あとから取りのぞけません。</p>'
+    +'<div class="row mt"><button class="btn sm primary" id="syYes">送って合わせる</button><button class="btn sm" id="syNo">送らない（ログアウト）</button></div>'
+    +'<p class="muted small mt">ふだん学習に使っている端末なら「送って合わせる」。ためしに解いただけの端末なら「送らない」を選び、この端末の記録を消してからログインし直してください（消し方は使い方の説明に）。</p></div>';
+  if(mode==="in")return h+'<p class="small">ログイン中：<b>'+esc(SY.user.email||"")+'</b></p><p class="small" id="syStat" role="status"></p><p class="muted small" id="syCnt"></p>'
+    +'<div class="row mt"><button class="btn sm" id="syNow">いますぐ同期</button><button class="btn sm" id="syOut">ログアウト</button></div>'
+    +'<p class="muted small mt">ログアウトしても、この端末の記録は消えません。</p>';
+  return h+'<p class="small" id="syStat" role="status"></p><div class="row mt" id="syRetryRow" hidden><button class="btn sm" id="syRetry">読み込み直す</button></div>';}
+function bindSync(box,mode){
+  if(mode==="out"){const go=()=>{const mail=$("#syMail").value.trim(),pw=$("#syPw").value;const st=$("#syStat"),bt=$("#syIn");
+      if(!mail||!pw){st.textContent="メールアドレスとパスワードを入れてください。";st.classList.add("bad");return;}
+      if(!SY.be)return;bt.disabled=true;st.classList.remove("bad");st.textContent="ログインしています…";
+      Promise.resolve().then(()=>SY.be.signIn(mail,pw)).then(()=>{},e=>{const s=$("#syStat"),b=$("#syIn");if(b)b.disabled=false;if(s){s.textContent=loginErrText(errCode(e));s.classList.add("bad");}});};
+    $("#syIn").addEventListener("click",go);$("#syPw").addEventListener("keydown",e=>{if(e.key==="Enter")go();});}
+  else if(mode==="in"){
+    $("#syNow").addEventListener("click",()=>{if(!SY.unsub)syncWatch();else reconcile();paintSync();});
+    $("#syOut").addEventListener("click",()=>{if(!SY.outAsk){SY.outAsk=true;$("#syOut").textContent="もう一度おすとログアウト";return;}
+      SY.outAsk=false;delete S.meta.syncOn;save();Promise.resolve().then(()=>SY.be.signOut()).catch(()=>{});});}
+  else if(mode==="hold"){
+    $("#syYes").addEventListener("click",()=>{SY.agree=true;reconcile();paintSync();});
+    $("#syNo").addEventListener("click",()=>{Promise.resolve().then(()=>SY.be.signOut()).catch(()=>{});});}
+  else{$("#syRetry").addEventListener("click",()=>location.reload());}}
+function paintSync(force){const x=syncText();const hd=$("#hdSync");
+  if(hd){const on=!!SY.user||!!S.meta.syncOn;hd.textContent=on?x.s:"";hd.classList.toggle("bad",on&&!!x.bad);}
+  const box=$("#syBox");if(!box)return;const mode=SY.user?(SY.hold?"hold":"in"):(SY.st==="out"?"out":"wait");
+  if(force||box.dataset.mode!==mode){box.dataset.mode=mode;box.innerHTML=syncPanelHtml(mode);bindSync(box,mode);}
+  const st=$("#syStat");if(st&&mode!=="out"){st.textContent=x.t;st.classList.toggle("bad",!!x.bad);}
+  const rr=$("#syRetryRow");if(rr)rr.hidden=SY.st!=="off";
+  if(mode==="hold"){const a=$("#syHn"),b=$("#syHc");if(a)a.textContent=SY.hold.n;if(b)b.textContent=SY.hold.c;}
+  const cn=$("#syCnt");if(cn)cn.textContent=SY.logOk?("この端末の記録 "+S.log.length+"件　クラウドの記録 "+cloudCount()+"件"):"";}
+function syncWake(){if(!SY.be){syncStart();return;}if(SY.user&&!SY.unsub)syncWatch();else syncSoon(300);paintSync();}
+
 /* ---------- init ---------- */
 (function(){try{localStorage.setItem("gakushu-test","1");localStorage.removeItem("gakushu-test");}catch(e){storageOk=false;}})();
 load();
@@ -1093,7 +1268,11 @@ const badgeCh=checkBadges();
 if(addedOld||firstRun||badgeIntro||badgeCh)save();
 render();
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!view.sess){if(checkBadges())save();render();}});
-window.__drill={weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
+document.addEventListener("visibilitychange",()=>{if(document.hidden)reconcile();else syncWake();});
+window.addEventListener("pagehide",()=>reconcile());
+window.addEventListener("online",syncWake);window.addEventListener("offline",()=>paintSync());
+syncStart();
+window.__drill={sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
 })();
 
 </script>
