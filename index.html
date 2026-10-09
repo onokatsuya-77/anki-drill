@@ -419,7 +419,7 @@ const CONTENT = {"units":[{"id":"s5b01","sub":"社会","vol":"5年下","round":1
 <script>
 (function(){
 "use strict";
-const APP_VER="1.6.1";
+const APP_VER="1.6.2";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -482,6 +482,10 @@ function backlogList(){const r=curRound();const so=x=>SUBS.indexOf(UNIT[x.u].sub
 function dueList(){const ts=todayStart();return ITEMS.filter(it=>{const s=ST[it.id];return s&&s.due<=ts;}).sort((a,b)=>{const x=ST[a.id],y=ST[b.id];return x.stage-y.stage||(isMarked(y)-isMarked(x))||x.due-y.due;});}
 function weakList(){const us=new Set(rangeUnits().map(u=>u.id));return ITEMS.filter(it=>us.has(it.u)&&isMarked(ST[it.id])).sort((a,b)=>ST[b.id].w-ST[a.id].w||ST[a.id].lastT-ST[b.id].lastT);}
 function kanjiList(){return ITEMS.filter(it=>isKanjiPending(ST[it.id])).sort((a,b)=>ST[b.id].k-ST[a.id].k);}
+function todayMissed(){const ts=todayStart();const m={},out=[];
+  S.log.forEach(a=>{if(a[2]<ts||!ITEM[a[0]])return;let x=m[a[0]];
+    if(a[1]<2){if(!x){x=m[a[0]]={id:a[0],x:0,t:0,last:a[1]};out.push(x);}if(a[1]===0)x.x++;else x.t++;}
+    if(x)x.last=a[1];});return out;}
 function todayEntries(){const ts=todayStart();return S.log.filter(a=>a[2]>=ts);}
 function reviewsToday(){const set=new Set();todayEntries().forEach(a=>{if(a[3]==="review")set.add(a[0]);});return set.size;}
 let extraToday=0,extraDay=0;
@@ -690,7 +694,15 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   ITEMS.forEach(it=>{const s=ST[it.id];if(!s)return;stages[s.stage-1]++;if(s.due<=ts)dueT++;else if(s.due<=addDays(ts,1))due1++;else if(s.due<=addDays(ts,7))due7++;});
   const iv=cfg("iv");const cap=cfg("cap");const le=S.meta.lastExport;
   let h='<div class="stats"><div class="stat"><b>'+done+'</b><span>解答済み / '+ITEMS.length+'語</span></div><div class="stat w"><b>'+marked.length+'</b><span>印つき</span></div><div class="stat tri"><b>'+kj.length+'</b><span>漢字ミス</span></div></div>';
-  h+='<div class="panel"><h2>復習の予定</h2><p class="small">今日まで <b>'+dueT+'</b>語　明日 <b>'+due1+'</b>語　7日以内 <b>'+due7+'</b>語</p>'
+  const tm=todayMissed();
+  h+='<div class="panel"><div class="row between"><h2>今日まちがえた語　<span class="muted small">'+tm.length+'語</span></h2>'
+    +(tm.length?'<span class="row" style="gap:6px"><button class="btn sm primary" id="nTodayGo">もう一度解く</button><button class="btn sm" id="nTodayPrint">印刷用シート</button></span>':'')+'</div>'
+    +(tm.length?'<ul class="list">'+tm.map(x=>{const it=ITEM[x.id];const n=x.x+x.t;
+      return '<li><span class="num">'+(x.x?"×":"△")+'</span><div class="body"><div class="qq">'+utag(it)+' '+esc(it.q)+'</div><div class="aa">'+esc(fullAns(it))+(it.y?' <span class="yomi-in">'+esc(it.y)+'</span>':"")+'</div></div>'
+        +'<span class="st">'+(n>1?'<span class="badge w">今日'+n+'回</span> ':"")+(x.last===2?'<span class="badge c">あとで○</span>':"")+'</span></li>';}).join("")+'</ul>'
+      +'<p class="muted small mt">×は答えがわからなかった語、△は漢字だけまちがえた語。「あとで○」は、そのあと今日のうちに○になった語。</p>'
+    :'<div class="empty">今日は、まだまちがえた語はありません。</div>')+'</div>';
+  h+='<div class="panel mt"><h2>復習の予定</h2><p class="small">今日まで <b>'+dueT+'</b>語　明日 <b>'+due1+'</b>語　7日以内 <b>'+due7+'</b>語</p>'
     +'<div class="stg mt">'+iv.map((d,i)=>'<div class="stgc"><b>'+stages[i]+'</b><span>'+d+'日後</span></div>').join("")+'</div>'
     +'<p class="muted small mt">○になるたびに右へ進み、次に出るまでの間があく。△や×は左はし（1日後）にもどる。</p></div>';
   h+='<div class="panel mt"><div class="row between"><h2>社会の漢字ミスの語　<span class="muted small">'+kj.length+'語</span></h2><button class="btn sm primary" id="nKanji"'+(kj.length?"":" disabled")+'>漢字を練習する</button></div>'
@@ -717,7 +729,9 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   el.innerHTML=h;nt.msg="";paintSync(true);
   $("#nKanji").addEventListener("click",startKanji);
   el.querySelectorAll("[data-round]").forEach(b=>b.addEventListener("click",()=>{setCfg("round",Number(b.dataset.round));render();}));
-  $("#nPrint").addEventListener("click",()=>openSheet());bindTestPanel(el);
+  $("#nPrint").addEventListener("click",()=>openSheet("mark"));
+  const tg=$("#nTodayGo");if(tg)tg.addEventListener("click",()=>{const ids=arrange(todayMissed().map(x=>ITEM[x.id])).map(it=>it.id);startSession(ids,{src:"weak",title:"今日まちがえた語"});});
+  const tp=$("#nTodayPrint");if(tp)tp.addEventListener("click",()=>openSheet("today"));bindTestPanel(el);
   el.querySelectorAll("[data-back]").forEach(b=>b.addEventListener("click",()=>{setCfg("back",Number(b.dataset.back));render();}));
   el.querySelectorAll("[data-rest]").forEach(b=>b.addEventListener("click",()=>{setCfg("rest",Number(b.dataset.rest));if(checkBadges())save();render();}));
   el.querySelectorAll("[data-sound]").forEach(b=>b.addEventListener("click",()=>{setCfg("sound",b.dataset.sound==="1");if(cfg("sound"))sfx("ding");render();}));
@@ -1010,17 +1024,17 @@ const sheet=document.createElement("div");sheet.id="sheet";sheet.setAttribute("a
 const SH={mode:1,scope:"mark",rk:{}};
 function sheetKey(it,idx){if(!isRnd(it))return idx[it.id];if(SH.rk[it.id]==null)SH.rk[it.id]=Math.random();return SH.rk[it.id];}
 function sheetItems(scope){const idx={};ITEMS.forEach((it,i)=>{idx[it.id]=i;});let l;
-  if(scope==="kanji")l=kanjiList();else if(scope==="round"){const r=curRound();l=ITEMS.filter(it=>UNIT[it.u].round===r);}else l=ITEMS.filter(it=>isMarked(ST[it.id]));
+  if(scope==="today")l=todayMissed().map(x=>ITEM[x.id]);else if(scope==="kanji")l=kanjiList();else if(scope==="round"){const r=curRound();l=ITEMS.filter(it=>UNIT[it.u].round===r);}else l=ITEMS.filter(it=>isMarked(ST[it.id]));
   return l.slice().sort((a,b)=>SUBS.indexOf(UNIT[a.u].sub)-SUBS.indexOf(UNIT[b.u].sub)||UNIT[a.u].round-UNIT[b.u].round||sheetKey(a,idx)-sheetKey(b,idx));}
 function sheetBlanks(it){if(it.k==="kanji"||it.k==="kana"){let h="";it.a.replace(/[『』「」]/g,"").split("").forEach(c=>{h+=(c==="＝"||c==="・")?esc(c):'<span class="bx"></span>';});return h+(it.s?" "+esc(it.s):"");}
   return '<span class="line"></span>';}
-function openSheet(){SH.rk={};buildSheet();sheet.classList.add("show");document.body.style.overflow="hidden";sheet.scrollTop=0;}
+function openSheet(scope){if(scope)SH.scope=scope;SH.rk={};buildSheet();sheet.classList.add("show");document.body.style.overflow="hidden";sheet.scrollTop=0;}
 function closeSheet(){sheet.classList.remove("show");document.body.style.overflow="";}
 function buildSheet(){const hide=SH.mode===1,withE=SH.mode===2;const d=new Date();const date=d.getFullYear()+"年"+(d.getMonth()+1)+"月"+d.getDate()+"日";
-  const n={mark:sheetItems("mark").length,kanji:sheetItems("kanji").length,round:sheetItems("round").length};const list=sheetItems(SH.scope);
-  const sName={mark:"印つきの語",kanji:"社会の漢字ミスの語",round:"第"+curRound()+"回のすべての語"};
+  const n={today:sheetItems("today").length,mark:sheetItems("mark").length,kanji:sheetItems("kanji").length,round:sheetItems("round").length};const list=sheetItems(SH.scope);
+  const sName={today:"今日まちがえた語",mark:"印つきの語",kanji:"社会の漢字ミスの語",round:"第"+curRound()+"回のすべての語"};
   let h='<div class="bar"><button class="btn primary" id="sPrint">印刷する</button><button class="btn" id="sClose">とじる</button>'
-    +'<span class="chips">'+["mark","kanji","round"].map(k=>'<button class="chip'+(SH.scope===k?" on":"")+'" data-ss="'+k+'">'+sName[k]+'（'+n[k]+'）</button>').join("")+'</span>'
+    +'<span class="chips">'+["today","mark","kanji","round"].map(k=>'<button class="chip'+(SH.scope===k?" on":"")+'" data-ss="'+k+'">'+sName[k]+'（'+n[k]+'）</button>').join("")+'</span>'
     +'<span class="chips">'+[[1,"答えをかくす（書きこみ用）"],[0,"答えつき"],[2,"答えと解説つき"]].map(x=>'<button class="chip'+(SH.mode===x[0]?" on":"")+'" data-sm="'+x[0]+'">'+x[1]+'</button>').join("")+'</span>'
     +'<span class="small" style="color:#555">「印刷する」が効かないときは、ブラウザの印刷（共有→プリント）を使う</span></div>';
   h+='<div class="paper"><h1>'+(hide?"確認テスト":"確認シート")+'　'+esc(sName[SH.scope])+'</h1><div class="sub">暗記ドリル '+esc(UNITS[0].vol)+'　'+date+'　'+list.length+'語　'+(hide?"答えは紙に書く。社会と漢字は、漢字で書く":"声に出して読む")+'</div>';
@@ -1285,7 +1299,7 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden)reconcile()
 window.addEventListener("pagehide",()=>reconcile());
 window.addEventListener("online",syncWake);window.addEventListener("offline",()=>paintSync());
 syncStart();
-window.__drill={arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
+window.__drill={todayMissed,arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,mergeEntries,exportText,cfg,reviewQuota};
 })();
 
 </script>
