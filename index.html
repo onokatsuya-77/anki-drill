@@ -416,6 +416,12 @@ p.bad,.small.bad{color:var(--shu);font-weight:700}
 .cv-card.dc{display:block;aspect-ratio:auto;background:transparent}
 .cv-card.dc .dcard{border:0;border-radius:12px}
 @media (max-width:520px){#sess .dcard{margin-left:-10px;margin-right:-10px;width:calc(100% + 20px);border-radius:6px}}
+
+.wbox{display:inline-grid;place-items:center;width:8em;max-width:100%;height:2.1em;padding:0 .3em;box-sizing:border-box;border:1.5px solid var(--ink2);border-radius:3px;font-family:var(--serif);font-size:1.55rem;font-weight:800;line-height:1;color:var(--ai);position:relative;background:var(--bg);white-space:nowrap}
+.wbox::after{content:"";position:absolute;inset:0;border:1px dashed var(--line);margin:3px;border-radius:2px;opacity:.7}
+.wbox span{opacity:0}
+.card.revealed .wbox span{opacity:1}
+.paper .bxl{display:inline-block;width:6.5em;height:1.7em;border:1px solid #333;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -457,7 +463,7 @@ const CONTENT = {"units":[{"id":"s5b01","sub":"社会","vol":"5年下","round":1
 <script>
 (function(){
 "use strict";
-const APP_VER="1.11.2";
+const APP_VER="1.12.0";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -555,11 +561,16 @@ function tag(r){return '<span class="tag r'+r+'">'+esc(ROUND_SHORT[r]||("第"+r+
 function utag(it){const u=UNIT[it.u];return '<span class="tag r'+u.round+'">'+esc(u.sub+" "+u.short)+'</span>';}
 const fullAns=it=>it.a+(it.s||"");
 const bare=it=>it.a.replace(/[『』「」＝・]/g,"");
+/* 国語の漢字：字数も送りがなも見せず、1つの長いわくに書かせる（社会は字数のマスのまま） */
+const isKokugoKanji=it=>it.k==="kanji"&&!!UNIT[it.u]&&UNIT[it.u].sub==="漢字";
 function hintText(it){const n=bare(it).length;
+  if(isKokugoKanji(it))return "漢字に直す。送りがなが必要なら、送りがなもひらがなで書く";
   if(it.k==="kanji"){const all=/^[\u3400-\u9FFF々]+$/.test(bare(it));return (all?"漢字"+n+"字":n+"字（漢字で書く）")+(it.s?"＋「"+esc(it.s)+"」":"");}
   if(it.k==="kana")return "カタカナ"+n+"字"+(it.s?"＋「"+esc(it.s)+"」":"");
   return UNIT[it.u].sub==="ことば"?"ことばを答える（ひらがなでもよい）":"ことばで答える";}
-function boxesHtml(it){if(it.k!=="kanji"&&it.k!=="kana")return "";let h='<div class="boxes">';
+function boxesHtml(it){if(it.k!=="kanji"&&it.k!=="kana")return "";
+  if(isKokugoKanji(it))return '<div class="boxes"><span class="wbox"><span>'+esc(fullAns(it))+'</span></span></div>';
+  let h='<div class="boxes">';
   it.a.replace(/[『』「」]/g,"").split("").forEach(c=>{if(c==="＝"||c==="・")h+='<span class="sep">'+esc(c)+'</span>';else h+='<span class="box"><span>'+esc(c)+'</span></span>';});
   if(it.s)h+='<span class="box suffix">'+esc(it.s)+'</span>';return h+'</div>';}
 function explHtml(it){const parts=[];if(it.n)parts.push('<p class="pt">'+esc(it.n)+'</p>');if(it.e)parts.push('<p>'+esc(it.e)+'</p>');if(!parts.length)return "";return '<div class="expl"><div class="expl-t">解説</div>'+parts.join("")+'</div>';}
@@ -1092,7 +1103,8 @@ function sheetKey(it,idx){if(!isRnd(it))return idx[it.id];if(SH.rk[it.id]==null)
 function sheetItems(scope){const idx={};ITEMS.forEach((it,i)=>{idx[it.id]=i;});let l;
   if(scope==="today")l=todayMissed().map(x=>ITEM[x.id]);else if(scope==="kanji")l=kanjiList();else if(scope==="round"){const r=curRound();l=ITEMS.filter(it=>UNIT[it.u].round===r);}else l=ITEMS.filter(it=>isMarked(ST[it.id]));
   return l.slice().sort((a,b)=>SUBS.indexOf(UNIT[a.u].sub)-SUBS.indexOf(UNIT[b.u].sub)||UNIT[a.u].round-UNIT[b.u].round||sheetKey(a,idx)-sheetKey(b,idx));}
-function sheetBlanks(it){if(it.k==="kanji"||it.k==="kana"){let h="";it.a.replace(/[『』「」]/g,"").split("").forEach(c=>{h+=(c==="＝"||c==="・")?esc(c):'<span class="bx"></span>';});return h+(it.s?" "+esc(it.s):"");}
+function sheetBlanks(it){if(isKokugoKanji(it))return '<span class="bxl"></span>';
+  if(it.k==="kanji"||it.k==="kana"){let h="";it.a.replace(/[『』「」]/g,"").split("").forEach(c=>{h+=(c==="＝"||c==="・")?esc(c):'<span class="bx"></span>';});return h+(it.s?" "+esc(it.s):"");}
   return '<span class="line"></span>';}
 function openSheet(scope){if(scope)SH.scope=scope;SH.rk={};buildSheet();sheet.classList.add("show");document.body.style.overflow="hidden";sheet.scrollTop=0;}
 function closeSheet(){sheet.classList.remove("show");document.body.style.overflow="";}
