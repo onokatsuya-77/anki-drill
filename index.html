@@ -299,7 +299,7 @@ button.banner{display:flex;justify-content:space-between;align-items:center;gap:
 @keyframes ringpop{0%{transform:scale(1)}30%{transform:scale(1.14)}60%{transform:scale(.98)}100%{transform:scale(1)}}
 @keyframes ringglow{0%,100%{stroke-width:9}30%{stroke-width:12;filter:brightness(1.35)}}
 #cele{position:fixed;inset:0;z-index:50;background:rgba(9,14,26,.88);display:flex;align-items:center;justify-content:center;padding:20px;overflow:hidden;color:#FFFFFF;text-align:center}
-#cele[hidden]{display:none}
+[hidden]{display:none!important}
 .cele-in{position:relative;max-width:420px;width:100%}
 .cele-top{font-weight:700;letter-spacing:.08em;color:#F2D58A;min-height:1.6em;margin-bottom:10px;font-size:1.05rem}
 .stage{perspective:900px;display:grid;place-items:center;height:232px}
@@ -457,7 +457,7 @@ const CONTENT = {"units":[{"id":"s5b01","sub":"社会","vol":"5年下","round":1
 <script>
 (function(){
 "use strict";
-const APP_VER="1.11.0";
+const APP_VER="1.11.2";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -1215,7 +1215,7 @@ function fbBackend(){let U,F,auth,db;
     delSet(uid,st){return Promise.all(st.cards.map(c=>F.deleteDoc(F.doc(db,"users",uid,"cards",c.id)))).then(()=>F.deleteDoc(F.doc(db,"users",uid,"cardsets",st.id)));}
   };}
 
-const SY={be:null,loading:false,st:"idle",user:null,err:"",unsub:null,cl:{},cs:null,logOk:false,stOk:false,sent:new Set(),sentState:"",pend:0,timer:null,last:0,outAsk:false,hold:null,agree:false};
+const SY={be:null,loading:false,st:"idle",loadAt:0,slow:false,wd:null,user:null,err:"",unsub:null,cl:{},cs:null,logOk:false,stOk:false,sent:new Set(),sentState:"",pend:0,timer:null,last:0,outAsk:false,hold:null,agree:false};
 const SY_DERIVED=/^(wb|ks):/;   // テストの点数から作り直すバッジは送らない
 const SY_CACHE=new WeakMap();
 function entInfo(a){let x=SY_CACHE.get(a);if(!x){let m="0000-00";try{m=new Date(a[2]).toISOString().slice(0,7);}catch(e){}
@@ -1254,18 +1254,24 @@ function softRender(){if(view.sess){updateCounts();return;}if(CE.open)return;
   if((view.tab==="mock"&&view.mock.mode!=="intro")||(view.tab==="order"&&view.order.mode!=="list"))return;
   const y=window.scrollY;render();window.scrollTo(0,y);}
 
-function syncStart(){if(SY.be||SY.loading)return;SY.loading=true;SY.st="load";SY.err="";paintSync();
-  let be;try{be=window.__cloudBackend?window.__cloudBackend():fbBackend();}catch(e){SY.loading=false;SY.st="off";SY.err=errCode(e);paintSync();return;}
-  Promise.resolve().then(()=>be.init()).then(()=>{SY.be=be;SY.loading=false;be.onAuth(syncAuth);},e=>{SY.loading=false;SY.st="off";SY.err=errCode(e);paintSync();});}
+function syncStart(){if(SY.be||SY.loading)return;SY.loading=true;SY.st="load";SY.err="";syncWatchdog();paintSync();
+  let be;try{be=window.__cloudBackend?window.__cloudBackend():fbBackend();}catch(e){SY.loading=false;SY.st="off";SY.err=errCode(e);syncWatchdog(false);paintSync();return;}
+  Promise.resolve().then(()=>be.init()).then(()=>{SY.be=be;SY.loading=false;if(SY.st==="load")SY.st="auth";syncWatchdog();paintSync();be.onAuth(syncAuth);},e=>{SY.loading=false;SY.st="off";SY.err=errCode(e);syncWatchdog(false);paintSync();});}
+/* 準備（部品の読み込み・ログインの確認）が長びいたら「読み込み直す」を出す。
+   スマホでは、画面を切りかえている間に読み込みが止まったまま戻らないことがある */
+const SY_WD_MS=12000;
+function syncWatchdog(on){clearTimeout(SY.wd);SY.wd=null;SY.slow=false;if(on===false)return;SY.loadAt=Date.now();
+  SY.wd=setTimeout(()=>{SY.wd=null;if(SY.st==="load"||SY.st==="auth"){SY.slow=true;paintSync();}},(window.__syncWdMs||SY_WD_MS));}
+function syncStuck(){return (SY.st==="load"||SY.st==="auth")&&Date.now()-SY.loadAt>(window.__syncWdMs||SY_WD_MS);}
 function syncStop(){cardStop();if(SY.unsub){try{SY.unsub();}catch(e){}}SY.unsub=null;clearTimeout(SY.timer);SY.cl={};SY.cs=null;SY.logOk=false;SY.stOk=false;SY.sent=new Set();SY.sentState="";SY.hold=null;SY.agree=false;}
-function syncAuth(u){syncStop();SY.user=u||null;SY.err="";SY.outAsk=false;SY.st=u?"in":"out";
+function syncAuth(u){syncStop();syncWatchdog(false);SY.user=u||null;SY.err="";SY.outAsk=false;SY.st=u?"in":"out";
   if(u){syncWatch();cardWatch();}
   paintSync(true);softRender();}
 function syncWatch(){if(!SY.be||!SY.user||SY.unsub)return;SY.err="";const uid=SY.user.uid;const live=()=>SY.user&&SY.user.uid===uid;
   SY.unsub=SY.be.watch(uid,{
     onLogs(list,fromCache){if(!live())return;const fresh=[];
       (list||[]).forEach(x=>{const old=SY.cl[x.m];const set=new Set();(x.e||[]).forEach(s=>{if(typeof s!=="string")return;set.add(s);if(!old||!old.has(s)){try{fresh.push(JSON.parse(s));}catch(e){}}});SY.cl[x.m]=set;});
-      SY.logOk=!fromCache;if(S.meta.syncOn&&fresh.length&&mergeEntries(fresh,false))afterRemote();
+      SY.logOk=!fromCache;if(S.meta.syncOn&&fresh.length){const n=mergeEntries(fresh,false);if(n){noteRecv(n);afterRemote();}}
       syncSoon(300);paintSync();},
     onState(data,fromCache){if(!live())return;SY.cs=data||{};SY.stOk=!fromCache;if(S.meta.syncOn&&mergeState(SY.cs))afterRemote();
       syncSoon(300);paintSync();},
@@ -1276,7 +1282,9 @@ function localOnly(){const out=[];for(const a of S.log){const x=entInfo(a);const
 function cloudCount(){let n=0;Object.keys(SY.cl).forEach(m=>{n+=SY.cl[m].size;});return n;}
 /* クラウドの中身を、まとめてこの端末に取りこむ（この端末をはじめて合わせるとき） */
 function pullAll(){const fresh=[];Object.keys(SY.cl).forEach(m=>SY.cl[m].forEach(s=>{try{fresh.push(JSON.parse(s));}catch(e){}}));
-  let ch=mergeEntries(fresh,false)>0;if(mergeState(SY.cs||{}))ch=true;if(ch)afterRemote();else save();}
+  const n=mergeEntries(fresh,false);if(n)noteRecv(n);let ch=n>0;if(mergeState(SY.cs||{}))ch=true;if(ch)afterRemote();else save();}
+/* ほかの端末の記録を受け取ったことを覚えておき、「きょう」とノートに出す */
+function noteRecv(n){S.meta.lastIn={t:Date.now(),n:n};if(!view.sess)view.banner="ほかの端末の記録 "+n+"件を受け取りました。";}
 /* この端末にあってクラウドにない記録を送る。クラウドの中身を受け取ってからでないと送らない。
    はじめて合わせる端末に記録があるときは、送る前に確かめる（ためしに解いた記録が混ざるのを防ぐ） */
 function reconcile(){clearTimeout(SY.timer);if(!SY.be||!SY.user||!SY.unsub||!SY.logOk||!SY.stOk)return;const uid=SY.user.uid;
@@ -1306,7 +1314,8 @@ function loginErrText(code){
   return "ログインできません。（"+code+"）";}
 function syncText(){const off=(typeof navigator!=="undefined"&&navigator.onLine===false);
   const OFF="インターネットにつながっていません。記録はこの端末に保存され、つながったときに送られます。";
-  if(SY.st==="idle"||SY.st==="load")return {t:"同期の準備をしています…",s:""};
+  if(SY.st==="idle"||SY.st==="load")return SY.slow?{t:"同期の準備に時間がかかっています。インターネットにつながっているか確かめて、「読み込み直す」をおしてください。",s:"同期の準備中",bad:true}:{t:"同期の準備をしています…",s:""};
+  if(SY.st==="auth")return SY.slow?{t:"ログインの状態を確かめるのに時間がかかっています。「読み込み直す」をおしてください。",s:"同期の準備中",bad:true}:{t:"ログインの状態を確かめています…",s:""};
   if(SY.st==="off")return {t:off?OFF:"同期の部品を読み込めませんでした。インターネットにつながっているか確かめて、「読み込み直す」をおしてください。（"+SY.err+"）",s:"オフライン",bad:!off};
   if(!SY.user)return {t:"",s:S.meta.syncOn?"同期が止まっています（ノートでログイン）":"",bad:true};
   if(SY.err&&!SY.unsub)return {t:syncErrText(SY.err),s:"同期できません",bad:true};
@@ -1324,7 +1333,7 @@ function syncPanelHtml(mode){let h='<h2>端末どうしの同期</h2>';
     +'<div class="syask"><p><b>この端末にだけある記録が <span id="syHn">'+SY.hold.n+'</span>件あります</b>（クラウドの記録は <span id="syHc">'+SY.hold.c+'</span>件）。</p><p>この記録をクラウドに送って、ほかの端末と合わせますか？　合わせた記録は、あとから取りのぞけません。</p>'
     +'<div class="row mt"><button class="btn sm primary" id="syYes">送って合わせる</button><button class="btn sm" id="syNo">送らない（ログアウト）</button></div>'
     +'<p class="muted small mt">ふだん学習に使っている端末なら「送って合わせる」。ためしに解いただけの端末なら「送らない」を選び、この端末の記録を消してからログインし直してください（消し方は使い方の説明に）。</p></div>';
-  if(mode==="in")return h+'<p class="small">ログイン中：<b>'+esc(SY.user.email||"")+'</b></p><p class="small" id="syStat" role="status"></p><p class="muted small" id="syCnt"></p>'
+  if(mode==="in")return h+'<p class="small">ログイン中：<b>'+esc(SY.user.email||"")+'</b></p><p class="small" id="syStat" role="status"></p><p class="muted small" id="syCnt"></p><p class="small" id="syLocal"></p><p class="muted small" id="syRecv"></p>'
     +'<div class="row mt"><button class="btn sm" id="syNow">いますぐ同期</button><button class="btn sm" id="syOut">ログアウト</button></div>'
     +'<p class="muted small mt">ログアウトしても、この端末の記録は消えません。</p>';
   return h+'<p class="small" id="syStat" role="status"></p><div class="row mt" id="syRetryRow" hidden><button class="btn sm" id="syRetry">読み込み直す</button></div>';}
@@ -1347,10 +1356,13 @@ function paintSync(force){const x=syncText();const hd=$("#hdSync");
   const box=$("#syBox");if(!box)return;const mode=SY.user?(SY.hold?"hold":"in"):(SY.st==="out"?"out":"wait");
   if(force||box.dataset.mode!==mode){box.dataset.mode=mode;box.innerHTML=syncPanelHtml(mode);bindSync(box,mode);}
   const st=$("#syStat");if(st&&mode!=="out"){st.textContent=x.t;st.classList.toggle("bad",!!x.bad);}
-  const rr=$("#syRetryRow");if(rr)rr.hidden=SY.st!=="off";
+  const rr=$("#syRetryRow");if(rr)rr.hidden=!(SY.st==="off"||SY.slow);
   if(mode==="hold"){const a=$("#syHn"),b=$("#syHc");if(a)a.textContent=SY.hold.n;if(b)b.textContent=SY.hold.c;}
-  const cn=$("#syCnt");if(cn)cn.textContent=SY.logOk?("この端末の記録 "+S.log.length+"件　クラウドの記録 "+cloudCount()+"件"):"";}
-function syncWake(){if(!SY.be){syncStart();return;}if(SY.user&&!SY.unsub)syncWatch();else syncSoon(300);if(SY.user){cardWatch();cardFetchMissing();}paintSync();}
+  const cn=$("#syCnt");if(cn)cn.textContent=SY.logOk?("この端末の記録 "+S.log.length+"件　クラウドの記録 "+cloudCount()+"件"):"";
+  const lo=$("#syLocal");if(lo){if(SY.logOk&&SY.stOk&&S.meta.syncOn&&!SY.hold){const n=localOnly().length;lo.textContent=n?("この端末にだけある記録 "+n+"件（まだクラウドに送れていません）"):"この端末の記録は、すべてクラウドにあります。";lo.classList.toggle("bad",n>0);lo.classList.toggle("grn",n===0);}else{lo.textContent="";lo.classList.remove("bad","grn");}}
+  const rv=$("#syRecv");if(rv){const li=S.meta.lastIn;rv.textContent=(li&&li.t)?("ほかの端末の記録を受け取りました：最後は "+fmtDate(li.t)+" "+hm(li.t)+"（"+li.n+"件）"):"ほかの端末の記録は、まだ受け取っていません。";}}
+function syncWake(){if(syncStuck()){SY.slow=true;paintSync();return;}
+  if(!SY.be){if(!SY.loading)syncStart();return;}if(SY.st==="auth"){paintSync();return;}if(SY.user&&!SY.unsub)syncWatch();else syncSoon(300);if(SY.user){cardWatch();cardFetchMissing();}paintSync();}
 
 /* ======================================================
    暗記カード（塾の補助プリントの画像）
@@ -1502,6 +1514,7 @@ render();
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!view.sess){if(checkBadges())save();render();}});
 document.addEventListener("visibilitychange",()=>{if(document.hidden)reconcile();else syncWake();});
 window.addEventListener("pagehide",()=>reconcile());
+window.addEventListener("pageshow",e=>{if(e.persisted)syncWake();});
 window.addEventListener("online",syncWake);window.addEventListener("offline",()=>paintSync());
 syncStart();
 window.__drill={startSession,dcards:{DCARDS,dcardHtml,unitDeck},cards:{CD,cardFor,openCardViewer,closeCardViewer,get ITEM_CARDS(){return ITEM_CARDS;},get CARD(){return CARD;}},todayMissed,arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,deckList,deckLeft,inDeck,applyItemFilter,CARD_IDS,get ITEMS(){return ITEMS;},ALL_ITEMS,mergeEntries,exportText,cfg,reviewQuota};
