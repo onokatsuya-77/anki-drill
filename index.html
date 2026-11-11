@@ -492,7 +492,7 @@ const CONTENT = {"units":[{"id":"k4a","sub":"漢字","vol":"4年上","round":-3,
 <script>
 (function(){
 "use strict";
-const APP_VER="1.25.0";
+const APP_VER="1.26.0";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -512,7 +512,7 @@ const SUBS=["社会","漢字","ことば"].filter(x=>UNITS.some(u=>u.sub===x));
 const KEY="gakushu-v1";            // このアプリの記録
 const OLD_KEY="shakai5b-drill-v1"; // 旧「社会 暗記ドリル」の記録（同じアドレスの下なら読める）
 const SUB_CHUNK={"社会":20,"漢字":20};
-const DEF={round:ROUNDS[ROUNDS.length-1],cap:60,chunk:20,back:10,goalNew:20,rest:2,rndS:false,rndK:true,rndW:false,cardOn:true,wordCardOnly:true,socDesc:false,wtDow:6,sound:true,testDate:"",iv:[1,3,7,14,30,60,120],deepN:10};
+const DEF={round:ROUNDS[ROUNDS.length-1],cap:60,chunk:20,back:10,goalNew:20,rest:2,rndS:false,rndK:true,rndW:false,cardOn:true,wordCardOnly:true,socDesc:false,wtDow:6,sound:true,testDate:"",iv:[1,3,7,14,30,60,120],deepN:20,deepK:30,revN:20,lap1:""};
 let S={schema:1,log:[],cfg:{},meta:{},days:{},badges:{},tests:[]}; // log: [id, g(2=○,1=△,0=×), t(ms), src]
 let storageOk=true;
 var CAP_FROM=Date.UTC(2026,9,21,5,0);
@@ -543,15 +543,17 @@ function todayStart(){return dayStart(Date.now());}
    出し直し（src の末尾が ":r"）と、集中練習・とことん練習で、その日すでに解いた問題の答え（その日の最初の答えだけを使う） */
 const FOCUS_SRC={focus:1,tokoton:1};
 let SKIP=new WeakSet();
-function isExtra(a,s){const src=a[3]||"";if(src.slice(-2)===":r")return true;return !!FOCUS_SRC[src]&&!!s&&s.lastT>=dayStart(a[2]);}
+/* 1.26.0 から：印・予定・殿堂入り・社会の周回は、その語の「その日の最初の答え」だけで決める（どのメニューでも）。
+   出し直し（:r）は使わない。「印をつける」（manual）はいつでも使う。社会の漢字の練習（kanji）の2回目からは、漢字ミスの数（kp）にだけ使う */
+function isExtra(a,s){const src=a[3]||"";if(src.slice(-2)===":r")return true;if(src==="manual")return false;return !!ITEM[a[0]]&&!!s&&s.lastT>=dayStart(a[2]);}
 function applyEntry(a){if(lapCache)lapCache.k="";if(smpCache)smpCache.k="";const iv=cfg("iv");const id=a[0],g=a[1],t=a[2];let s=ST[id];const first=!s;
-  if(isExtra(a,s)){SKIP.add(a);return;}
+  if(isExtra(a,s)){if(a[3]==="kanji"&&g===2&&s&&s.kp>0){s.kp--;if(s.kp===0)s.kclr=1;}SKIP.add(a);return;}
   if(!s)s=ST[id]={stage:0,due:0,c:0,w:0,k:0,kp:0,seq:[],lastT:0,firstT:t,firstSrc:a[3]||"",maxStage:0,clr:0,kclr:0,g0:g,hof:0};
   const wasMarked=isMarked(s),wasKp=s.kp>0;
   /* 前の範囲（復習・積み上げで初めて出た語）は習った語なので、初めて○なら次は7日後から */
   const pastFirst=first&&(a[3]==="review"||a[3]==="back");
   /* 社会の1周目は浅く解くので、×・△でも印にしない */
-  const it0=ITEM[id],soft=first&&(a[3]==="lap1"||(a[3]==="new"&&t>=SOFT_FROM&&!!it0&&!!UNIT[it0.u]&&UNIT[it0.u].sub==="社会"));
+  const it0=ITEM[id],soft=first&&(a[3]==="lap1"||a[3]==="lap"||(a[3]==="new"&&t>=SOFT_FROM&&!!it0&&!!UNIT[it0.u]&&UNIT[it0.u].sub==="社会"));
   if(g===2){s.c++;
     if(pastFirst){s.stage=Math.min(3,iv.length);s.due=addDays(dayStart(t),iv[s.stage-1]);}
     else if(s.stage===0||t>=s.due){const late=s.stage>0?(dayStart(t)-s.due)/DAY:0;
@@ -628,10 +630,19 @@ function startStack(){const sp=stackPool();if(!sp.list.length)return;startSessio
 /* 復習のつづき：きょうの復習の目安を達成したあとも、予定の日が来ている語が残っていれば、遅れの大きい順に進める（数は積み上げに入る） */
 function moreDue(){const rp=reviewPlan();if(SUBS.some(sub=>rp.per[sub].left>0&&rp.per[sub].queue.length))return [];return dueList();}
 function startMore(){const l=moreDue();if(!l.length){view.sess=null;switchTab("home");return;}startSession(arrange(l.slice(0,cfg("chunk"))).map(it=>it.id),{src:"back",title:"復習のつづき",more:true});}
-function lapState(){const ts=todayStart();const L=lapItems();const eve=isLapEve();const safe=lapSafe();
-  const first=L.filter(it=>!ST[it.id]);
-  const daily=L.filter(it=>{const s=ST[it.id];return s&&s.lastT<ts&&(eve||!safe.has(it.id));});
-  return {L,first,daily,eve,safe:L.filter(it=>safe.has(it.id)).length};}
+/* 社会の最初の1周目：終わるまで、社会のメニューはほかのボタンを出さない（その回で最初の1周目だけ）。
+   終わった回は cfg.lap1（"11,12" のような回の並び。端末どうしで同期）に入れる。あとから増えた語は「きょうの1周」へ */
+const GATE_FROM=Date.UTC(2026,10,11,15,0);   // 1.26.0 より前に1周目を始めた回は、8割以上解いていれば終わったものとする
+function lap1Rounds(){return String(cfg("lap1")||"").split(",").map(Number).filter(n=>n>0);}
+function lapGate(){const r=lapRound();const L=lapItems();if(!L.length||lap1Rounds().includes(r))return false;
+  const n=L.filter(it=>!!ST[it.id]).length;let done=n>=L.length;
+  if(!done&&n>=L.length*0.8){const ids=new Set(L.map(it=>it.id));done=S.log.some(a=>a[3]==="lap1"&&a[2]<GATE_FROM&&ids.has(a[0]));}
+  if(done){setCfg("lap1",lap1Rounds().concat([r]).sort((x,y)=>x-y).join(","));return false;}
+  return true;}
+function lapState(){const ts=todayStart();const L=lapItems();const eve=isLapEve();const safe=lapSafe();const gate=lapGate();
+  const first=gate?L.filter(it=>!ST[it.id]):[];
+  const daily=gate?[]:L.filter(it=>{const s=ST[it.id];return !s||(s.lastT<ts&&(eve||!safe.has(it.id)));});
+  return {L,first,daily,eve,gate,safe:L.filter(it=>safe.has(it.id)).length};}
 function lapTitle(kind){const rs="第"+lapRound()+"回";return LAP_SUB+" "+rs+(kind==="first"?" 1周目":(isLapEve()?" 週テスト前日の1周":" きょうの1周"));}
 function startLap(kind){const lp=lapState();const l=kind==="first"?lp.first:lp.daily;if(!l.length){view.sess=null;switchTab("home");return;}
   startSession(arrange(l).slice(0,LAP_CHUNK).map(it=>it.id),{src:kind==="first"?"lap1":"lap",title:lapTitle(kind),lap:kind});}
@@ -652,8 +663,23 @@ function todayMissed(){const ts=todayStart();const m={},out=[];
 function todayEntries(){const ts=todayStart();return S.log.filter(a=>a[2]>=ts);}
 /* きょうの復習の計画：1日の目安（cap）を教科ごとに等分し、足りない教科の分はほかの教科へ。予定の語を先に、空いた分を前の範囲でうめる */
 function reviewDoneBySub(){const seen=new Set(),c={};todayEntries().forEach(a=>{if(a[3]!=="review"||!ITEM[a[0]]||seen.has(a[0]))return;seen.add(a[0]);const sub=UNIT[ITEM[a[0]].u].sub;c[sub]=(c[sub]||0)+1;});return c;}
+/* 復習（1.26.0。3教科共通）：予定の日が来た語 → 印つきの語 → 前の範囲の解いていない語。1回のうち2割は前の範囲から。
+   ×は3問あと・△は6問あと（足りなければ早めに）にもう一度、○になるまで。何度でもできる。
+   1日の目安（cap）までが復習の輪、こえた分は積み上げの輪 */
+const REV_PREV_RATE=0.2;
+function revN(){return Number(cfg("revN"))||20;}
+function revParts(sub,due){const ts=todayStart();if(sub===LAP_SUB&&lapGate())return {due:[],mk:[],past:[]};
+  due=(due||dueList()).filter(it=>UNIT[it.u].sub===sub);const ds=new Set(due.map(it=>it.id));
+  const mk=ITEMS.filter(it=>{if(UNIT[it.u].sub!==sub||ds.has(it.id))return false;const s=ST[it.id];return isMarked(s)&&!s.hof&&s.lastT<ts&&!inDeck(it)&&!lapCovers(it);}).sort((a,b)=>ST[b.id].w-ST[a.id].w||ST[a.id].lastT-ST[b.id].lastT);
+  return {due,mk,past:pastPool(sub)};}
+function revPick(sub,n,parts){const p=parts||revParts(sub);const A=p.due.concat(p.mk),B=p.past;
+  const nb0=Math.min(B.length,Math.round(n*REV_PREV_RATE));const na=Math.min(A.length,n-nb0);const nb=Math.min(B.length,n-na);
+  const a=A.slice(0,na),b=B.slice(0,nb);const nd=Math.min(na,p.due.length);return {list:a.concat(b),nDue:nd,nMk:na-nd,nPast:nb,avail:A.length+B.length};}
+function revBreak(pk){return [pk.nDue?"予定の語 "+pk.nDue:"",pk.nMk?"印つき "+pk.nMk:"",pk.nPast?"前の範囲 "+pk.nPast:""].filter(Boolean).join("・");}
+function startReview(sub,n){const pk=revPick(sub,n||revN());if(!pk.list.length){view.sess=null;render();return;}
+  startSession(arrange(pk.list).map(it=>it.id),{src:"review",re:"review",title:sub+"の復習",rev:sub});}
 function reviewPlan(){reviewQuota();const total=cfg("cap")+extraToday;const done=reviewDoneBySub();const due=dueList();const per={};
-  SUBS.forEach(sub=>{const d=due.filter(it=>UNIT[it.u].sub===sub);const p=pastPool(sub);per[sub]={due:d,pool:p,done:done[sub]||0,alloc:0};});
+  SUBS.forEach(sub=>{const p=revParts(sub,due);per[sub]={parts:p,due:p.due,pool:p.mk.concat(p.past),done:done[sub]||0,alloc:0};});
   let rest=total,open=SUBS.filter(sub=>per[sub].done+per[sub].due.length+per[sub].pool.length>0);
   while(rest>0&&open.length){const share=Math.max(1,Math.floor(rest/open.length));let used=0;const next=[];
     open.forEach(sub=>{const x=per[sub];const need=x.done+x.due.length+x.pool.length-x.alloc;const g=Math.min(share,need,rest-used);if(g>0){x.alloc+=g;used+=g;}if(x.alloc<x.done+x.due.length+x.pool.length)next.push(sub);});
@@ -722,8 +748,10 @@ function focusDone(mode){const set=new Set();todayEntries().forEach(a=>{if((a[3]
 function focusList(sub,kind,mode){const FS=fsrsAll(),at=focusAt(),inR=focusIn(kind,sub),done=focusDone(mode||"focus");const p={};
   const l=ITEMS.filter(it=>UNIT[it.u].sub===sub&&FS[it.id]&&!done.has(it.id)&&inR(it));
   l.forEach(it=>{p[it.id]=Math.round(focusR(FS[it.id],at)*100);});
-  return l.sort((a,b)=>{const x=FS[a.id],y=FS[b.id];return p[a.id]-p[b.id]||y.d-x.d||y.x-x.x||x.last-y.last||(a.id<b.id?-1:1);});}
-function deepN(){return Number(cfg("deepN"))||10;}
+  const mk=it=>(mode==="tokoton"&&isMarked(ST[it.id]))?1:0;
+  return l.sort((a,b)=>{const x=FS[a.id],y=FS[b.id];return mk(b)-mk(a)||(mk(a)?ST[b.id].w-ST[a.id].w:0)||p[a.id]-p[b.id]||y.d-x.d||y.x-x.x||x.last-y.last||(a.id<b.id?-1:1);});}
+function deepN(){return Number(cfg("deepN"))||20;}
+function deepK(){return Number(cfg("deepK"))||30;}
 /* 組分け回の集中練習・とことん練習：1回のうち2割（20問なら4問）を前の範囲から出す。前の範囲が足りなければ組分け範囲でうめる */
 const KUMI_PREV_RATE=0.2;
 function focusPick(sub,kind,mode,n){const main=focusList(sub,kind,mode);if(kind!=="kumi")return main.slice(0,n);
@@ -732,12 +760,13 @@ function focusPick(sub,kind,mode,n){const main=focusList(sub,kind,mode);if(kind!
 function focusCount(sub,kind,mode){return focusList(sub,kind,mode).length+(kind==="kumi"?focusList(sub,"kumiPrev",mode).length:0);}
 function startFocus(sub,kind){const l=focusPick(sub,kind,"focus",FOCUS_N);if(!l.length){view.sess=null;render();return;}
   startSession(l.map(it=>it.id),{src:"focus",re:"focus",title:sub+"の集中練習（"+focusRangeName(kind,sub)+"）",focus:{sub,kind}});}
-function startDeep(sub,kind,ids){const list=ids||focusPick(sub,kind,"tokoton",deepN()).map(it=>it.id);if(!list.length){view.sess=null;render();return;}
+function startDeep(sub,kind,ids){const list=ids||focusPick(sub,kind,"tokoton",kind==="cur"?deepN():deepK()).map(it=>it.id);if(!list.length){view.sess=null;render();return;}
   startSession(list,{src:"tokoton",re:"tokoton",title:sub+"のとことん練習（"+focusRangeName(kind,sub)+"）",focus:{sub,kind}});}
 /* 出し直し：×は3問あと、△は6問あと。
    集中練習・弱点・今日まちがえた語：○で外れる。1回に4回まで。
    とことん練習：回数の上限なし。×か△があった問題は、○が2回続くまで外れない（○の次は5問あとに確かめる） */
 function reGap(mode,h){const g=h[h.length-1],n=h.length;
+  if(mode==="review")return g===2?0:(g===0?3:6);
   if(mode==="tokoton"){if(g<2)return g===0?3:6;if(!h.some(x=>x<2))return 0;return (n>=2&&h[n-2]===2)?0:5;}
   if(g===2||n>=FOCUS_MAX)return 0;return g===0?3:6;}
 function reCleared(mode,h){const n=h.length;if(!n)return false;if(mode==="tokoton")return h[n-1]===2&&(!h.some(x=>x<2)||(n>=2&&h[n-2]===2));return h[n-1]===2;}
@@ -869,9 +898,9 @@ function todaySteps(){const steps=[];const chunk=cfg("chunk");const rs="第"+cur
   // 新しい語（社会・漢字）。ことばは下の「カード」でまとめてやる
   // 社会：いまの回を1日で1周（20語ごとに区切るが、続けて1周する）
   const lp=lapState();const sLap=[];
-  if(lp.first.length)sLap.push({cat:LAP_SUB,grp:"cur",short:"1周目 のこり"+lp.first.length,label:LAP_SUB+" 第"+lapRound()+"回 1周目　のこり"+lp.first.length+"語",sub:"全"+lp.L.length+"語を、きょうのうちに1周する。20語ごとに「続ける」で先へ。"+(cfg(RND_KEY[LAP_SUB])?"順番はばらばらに出る":"教科書の順に出る"),act:()=>startLap("first")});
+  if(lp.first.length)sLap.push({cat:LAP_SUB,grp:"cur",short:"1周目 のこり"+lp.first.length,label:LAP_SUB+" 第"+lapRound()+"回 1周目　のこり"+lp.first.length+"語",sub:"全"+lp.L.length+"語を、きょうのうちに1周する。終わるまで、社会のほかのボタンは出ない。×・△でも印はつかない。20語ごとに「続ける」で先へ。"+(cfg(RND_KEY[LAP_SUB])?"順番はばらばらに出る":"教科書の順に出る"),act:()=>startLap("first")});
   if(lp.daily.length)sLap.push({cat:LAP_SUB,grp:"cur",short:(lp.eve?"前日の1周":"きょうの1周")+" のこり"+lp.daily.length,label:lapTitle("daily")+"　のこり"+lp.daily.length+"語",
-    sub:lp.eve?"あしたは週テスト。○が続いた語もふくめて、全部をもう一度":"×・△だった語と、○がまだ1日だけの語を、毎日1周。2日続けて○の語は外れる（いま"+lp.safe+"語）",act:()=>startLap("daily")});
+    sub:(lp.eve?"あしたは週テスト。○が続いた語もふくめて、全部をもう一度":"×・△だった語と、○がまだ1日だけの語を、毎日1周。2日続けて○の語は外れる（いま"+lp.safe+"語）")+(lp.daily.some(it=>!ST[it.id])?"。あとから増えた語もふくむ":""),act:()=>startLap("daily")});
   const sNew=sLap.concat(SUBS.filter(sub=>sub!=="ことば"&&sub!==LAP_SUB).map(sub=>{const l=newList(sub);if(!l.length)return null;const n=SUB_CHUNK[sub]||chunk;
     return {cat:sub,grp:"cur",short:"新しい語 "+Math.min(n,l.length),label:sub+" "+rs+"の新しい語を "+Math.min(n,l.length)+"語",sub:"のこり"+l.length+"語。"+(cfg(RND_KEY[sub])?"順番はばらばらに出る":"教科書の順に出る"),
       act:()=>startSession(arrange(newList(sub)).slice(0,n).map(it=>it.id),{src:"new",title:sub+" "+rs+"の新しい語"})};}).filter(Boolean));
@@ -881,40 +910,28 @@ function todaySteps(){const steps=[];const chunk=cfg("chunk");const rs="第"+cur
     sub:(dkLeft.length<dk.length?"全"+dk.length+"語のうち、今日まだ解いていない語。":"毎日、"+rs+"のカード全部を1回ずつ。")+(cfg("rndW")?"順番はばらばらに出る":"カードの順に出る"),
     act:()=>startSession(arrange(deckLeft()).map(it=>it.id),{src:"deck",title:"ことば "+rs+"のカード"})}:null;
   // 復習：教科ごと。予定の語を先に、空いた分を前の範囲の語でうめる（1日の目安 cap を教科で分ける）
-  const sRev=SUBS.map(sub=>{const x=rp.per[sub];if(!x.left||!x.queue.length)return null;const q=x.queue.slice(0,chunk);const a=q.filter(it=>!!ST[it.id]).length,b=q.length-a;
-    return {cat:sub,grp:"cur",short:"復習 "+x.left,label:sub+"の復習 "+q.length+"語",sub:(a?"予定の復習 "+a+"語":"")+(a&&b?"・":"")+(b?"前の範囲（初めての語） "+b+"語":"")+"。きょうの"+sub+"の復習は、あと"+x.left+"語",
-      act:()=>{const y=reviewPlan().per[sub];startSession(arrange(y.queue.slice(0,chunk)).map(it=>it.id),{src:"review",title:sub+"の復習"});}};}).filter(Boolean);
-  // 復習のつづき：目安を達成しても、予定の日が来ている語が残っていれば出す
-  const dueRest=sRev.length?[]:due;
-  const sMore=dueRest.length?{cat:"all",label:"復習のつづき "+Math.min(chunk,dueRest.length)+"語",
-    sub:"きょうの復習の目安は達成。予定の日が来ている語が、まだ"+dueRest.length+"語（"+SUBS.map(sub=>[sub,bySub(dueRest,sub).length]).filter(x=>x[1]).map(x=>x[0]+" "+x[1]).join("・")+"）。できるときに進めておくと、あしたが楽になる。解いた数は積み上げに入る",
-    act:startMore}:null;
-  // 弱点：教科ごと
-  const nt0=nextTest();const wName=(isPreTest()&&nt0&&nt0.cycle===0)?"これまでの範囲の弱点":"組分け範囲の弱点";
-  const sWeak=SUBS.map(sub=>{const l=bySub(weak,sub);if(!l.length||!isPreTest())return null;   // 弱点の段は、テストの直前7日だけ
-    return {cat:sub,grp:"kumi",short:"弱点 "+l.length,label:wName+"（"+sub+"）"+Math.min(l.length,chunk)+"語",sub:"印つき"+l.length+"語から、まちがいの多い順。×は3問あと・△は6問あとにもう一度出る",
-      act:()=>startSession(arrange(bySub(fresh(weakList()),sub).slice(0,chunk)).map(it=>it.id),{src:"weak",re:"weak",title:wName+"（"+sub+"）"})};}).filter(Boolean);
-  // 積み上げ：新しい語と復習の輪がそろったら出る。前の範囲から自分で進めた語を数える
-  const sBack=[];const rg0=rings();if(stackOpen(rg0)){const sp=stackPool();if(sp.list.length){const n=Math.min(chunk,sp.list.length);
-    sBack.push({cat:"all",label:"積み上げ："+(sp.kind==="past"?"前の範囲から ":"印つきの語を ")+n+"語",
-      sub:"きょうの分はおわり。ここからは自分で積み上げる（"+(sp.kind==="past"?"のこり "+SUBS.map((sub,i)=>sub+" "+sp.pools[i].length).join("・"):"前の範囲はぜんぶ解いた")+"）。何回でもできる",act:startStack});}}
-  (isPreTest()?sWeak.concat(sRev,sNew,[sDeck],[sMore],sBack):sNew.concat([sDeck],sRev,[sMore],sWeak,sBack)).forEach(s=>{if(s)steps.push(s);});
+  const sRev=SUBS.map(sub=>{const x=rp.per[sub];if(!x.left)return null;const n=Math.min(revN(),x.left);const pk=revPick(sub,n,x.parts);if(!pk.list.length)return null;
+    return {cat:sub,grp:"cur",rev:1,short:"復習 "+x.left,label:sub+"の復習 "+pk.list.length+"語",sub:revBreak(pk)+"。×は3問あと・△は6問あとにもう一度（○になるまで）。きょうの"+sub+"の復習は、あと"+x.left+"語",
+      act:()=>startReview(sub,n)};}).filter(Boolean);
+  sNew.concat([sDeck],sRev).forEach(s=>{if(s)steps.push(s);});
   return {steps,due,quota,nw,weak,back,rp,deck:dk,deckLeft:dkLeft};}
 /* 教科のメニュー：通常回（その教科のいまの回）と組分け回（組分け範囲）。テストの7日前からは組分け回を上に。
    集中練習（いまの回）は、いまの回の語を全部1回は解いてから出す */
 function curUnsolved(sub){const inR=focusIn("cur",sub);return ITEMS.some(it=>UNIT[it.u].sub===sub&&inR(it)&&!ST[it.id]);}
-function catMenu(sub,t){const mine=t.steps.filter(s=>s.cat===sub);const cur=mine.filter(s=>s.grp==="cur"),kumi=mine.filter(s=>s.grp==="kumi");
-  const nt=nextTest();const fsub=(nt?nt.name+"（"+testDateText(nt)+"）":"7日後")+"に思い出せる見込みの低い順。×は3問あと・△は6問あとにもう一度出る";
-  const fc=focusList(sub,"cur","focus");
-  if(fc.length&&!curUnsolved(sub))cur.push({ex:1,label:"集中練習 "+focusRangeName("cur",sub)+"　"+Math.min(FOCUS_N,fc.length)+"問",sub:"解いた"+fc.length+"問から、"+fsub,act:()=>startFocus(sub,"cur")});
-  const fkN=focusCount(sub,"kumi","focus"),dkN=focusCount(sub,"kumi","tokoton"),pv=prevRangeUnits().length?"（前の範囲から2割）":"";
-  if(fkN)kumi.push({ex:1,label:"集中練習　"+Math.min(FOCUS_N,fkN)+"問",sub:"解いた"+fkN+"問から、"+fsub+pv,act:()=>startFocus(sub,"kumi")});
-  if(dkN)kumi.push({ex:1,label:"とことん練習　"+Math.min(deepN(),dkN)+"問",sub:"苦手な問題を、○が2回続くまでくり返す（回数の上限なし）。全部の問題が外れたら終わり",act:()=>startDeep(sub,"kumi")});
+function catMenu(sub,t){const mine=t.steps.filter(s=>s.cat===sub);const cur=mine.filter(s=>s.grp==="cur");const kumi=[];
+  /* 社会の最初の1周目のあいだは、1周目だけ */
+  if(sub===LAP_SUB&&lapGate())return [{title:"通常回　第"+lapRound()+"回",steps:cur}];
+  /* 復習：きょうの目安を達成したあとも、何度でも（解いた数は積み上げの輪に入る） */
+  if(!cur.some(s=>s.rev)){const pk=revPick(sub,revN());if(pk.list.length)cur.push({ex:1,rev:1,label:sub+"の復習　"+pk.list.length+"語",sub:"きょうの目安は達成。何度でもできて、解いた数は積み上げの輪に入る（"+revBreak(pk)+"）",act:()=>startReview(sub,revN())});}
+  const tk="苦手な問題（印つきの語から）を、○が2回続くまでくり返す（回数の上限なし）。全部の問題が外れたら終わり";
+  const dc=focusCount(sub,"cur","tokoton");
+  if(dc)cur.push({ex:1,label:"とことん練習　"+Math.min(deepN(),dc)+"問",sub:focusRangeName("cur",sub)+"の"+tk,act:()=>startDeep(sub,"cur")});
+  const dk=focusCount(sub,"kumi","tokoton"),pv=prevRangeUnits().length?"（前の範囲から2割）":"";
+  if(dk)kumi.push({ex:1,label:"とことん練習　"+Math.min(deepK(),dk)+"問",sub:tk+pv,act:()=>startDeep(sub,"kumi")});
   if(sub==="社会"){const on=oxCount("kumi");if(on)kumi.push({ex:1,label:"正誤の練習　"+Math.min(OX_N,on)+"問",sub:"文を読んで○か×かを答える（テストの選択肢の形）。まちがえた文は最後にもう一度出る。"+on+"文から",act:()=>startOx("kumi")});
     const cn=cmpCount("kumi");if(cn)kumi.push({ex:1,label:"見くらべの練習　"+Math.min(CMP_N,cn)+"問",sub:"似ていてまぎらわしいものを区別する。説明を読んで、どれのことかをえらぶ。まちがえた問題は最後にもう一度。"+cn+"組から",act:()=>startCmp("kumi")});}
   const g=[{title:"通常回　"+focusRangeName("cur",sub),steps:cur},{title:kumiAll()?"これまでの範囲":"組分け回　"+kumiName(),steps:kumi}];
   if(isPreTest())g.reverse();
-  if(!kumiAll()){const fa=focusList(sub,"all","focus");if(fa.length)g.push({title:"これまでの範囲",steps:[{ex:1,label:"集中練習　"+Math.min(FOCUS_N,fa.length)+"問",sub:"これまでに解いた"+fa.length+"問から、"+fsub,act:()=>startFocus(sub,"all")}]});}
   return g.filter(x=>x.steps.length);}
 function stepBtns(list,base,cls){return '<div class="steps'+(cls||"")+'">'+list.map((s,i)=>'<button class="step'+(s.ex?" ex":"")+'" data-step="'+(base+i)+'"><span class="step-n">'+(base+i+1)+'</span><span><b>'+esc(s.label)+'</b><br><span class="muted small">'+esc(s.sub)+'</span></span><span class="go">▶</span></button>').join("")+'</div>';}
 function renderCat(sub){const el=$("#tab-home");const t=todaySteps();const nt=nextTest(),dt=daysToTest();const g=catMenu(sub,t);const list=[];
@@ -940,11 +957,11 @@ function renderHome(){if(view.cat&&SUBS.includes(view.cat)){renderCat(view.cat);
   if(isPreTest())h+='<p class="muted" style="margin-bottom:8px">'+esc(nt.name)+'（'+testDateText(nt)+'）まで <b class="red">'+(dt===0?"今日":"あと"+dt+"日")+'</b>。教科のメニューでは、'+(kumiAll()?"これまでの範囲":"組分け回")+'の練習を先に出します。</p>';
   /* 教科のボタン。押すと、その教科のメニュー（通常回・組分け回） */
   h+='<div class="cats">'+SUBS.map(sub=>{const mine=t.steps.filter(s=>s.cat===sub);const done=!mine.length;
-    return '<button class="catb'+(done?" done":"")+'" data-cat="'+esc(sub)+'"><b>'+esc(sub)+'</b><span class="small">'+(done?'<span class="grn">きょうやることは、おわり</span><br><span class="muted">集中練習・とことん練習はメニューから</span>':esc(mine.map(s=>s.short).join("・")))+'</span><span class="go">▶</span></button>';}).join("")+'</div>';
+    return '<button class="catb'+(done?" done":"")+'" data-cat="'+esc(sub)+'"><b>'+esc(sub)+'</b><span class="small">'+(done?'<span class="grn">きょうやることは、おわり</span><br><span class="muted">復習・とことん練習はメニューから</span>':esc(mine.map(s=>s.short).join("・")))+'</span><span class="go">▶</span></button>';}).join("")+'</div>';
   const all=t.steps.filter(s=>s.cat==="all");
   if(all.length)h+='<div class="grph">全部の教科</div>'+stepBtns(all,0," nofirst");
   if(!t.steps.length)h+='<p class="muted mt">'+(t.due.length?"復習待ちの"+t.due.length+"語は、明日からまた出ます。":"新しい語も復習もありません。")+'</p>';
-  if(!stackOpen(rg)&&rg[2].goal>0)h+='<p class="muted small mt">新しい語と復習の輪がそろうと、「積み上げ」の段が出ます。</p>';
+  if(rg[1].done>=rg[1].goal&&rg[2].done<rg[2].goal)h+='<p class="muted small mt">教科のメニューの「復習」で、きょうの目安をこえて解いた語が「積み上げ」の輪に入ります。</p>';
   h+='</div>';
   h+='<div class="panel mt"><h2>第'+curRound()+'回の進み具合</h2><div class="rows">'+curUnits().map(unitProgress).map(p=>'<div class="prow"><div class="prow-h"><b>'+esc(p.u.sub)+'　<span class="small" style="font-weight:400">'+esc(p.u.name.replace(/^第\d+回\s*/,""))+'</span></b><span class="muted small">'+p.done+' / '+p.total+'語　印つき <b class="'+(p.marked?"red":"")+'">'+p.marked+'</b></span></div>'+bar(p.done,p.total,p.marked)+'</div>').join("")+'</div>'
     +(nt?'<p class="muted small mt">次のテスト：'+esc(nt.name)+' '+testDateText(nt)+'（'+(dt===0?"今日":"あと"+dt+"日")+'）</p>':'')+'</div>';
@@ -967,7 +984,7 @@ function startKanji(){const ids=kanjiList().slice(0,cfg("chunk")).map(it=>it.id)
 /* ======================================================
    出題（共通）
 ====================================================== */
-function startSession(ids,opt){if(!ids.length)return;view.sess={queue:ids.slice(),i:0,revealed:false,results:[],src:opt.src,title:opt.title,kanji:!!opt.kanji,lap:opt.lap||null,stack:!!opt.stack,more:!!opt.more,done:false,
+function startSession(ids,opt){if(!ids.length)return;view.sess={queue:ids.slice(),i:0,revealed:false,results:[],src:opt.src,title:opt.title,kanji:!!opt.kanji,lap:opt.lap||null,rev:opt.rev||null,stack:!!opt.stack,more:!!opt.more,done:false,
   re:opt.re||null,hist:{},reN:0,focus:opt.focus||null,cat:view.cat||null};scrollTop();render();}   // re: 出し直しのしかた（focus / tokoton / weak）。hist: この回の中の答え
 function endSession(){view.sess=null;scrollTop();render();}
 function renderSess(){const q=view.sess;if(q.done){renderSessDone();return;}
@@ -1020,15 +1037,16 @@ function renderSessDone(){const q=view.sess;const el=$("#sess");const n=q.result
     h+='<p class="mt'+(rest?"":" grn")+'"><b>'+(rest?(esc(lapTitle(q.lap))+"　のこり "+rest+"語"):(esc(lapTitle(q.lap))+"　おわり！"))+'</b></p>';}
   if(q.stack){const sp=stackPool();if(sp.list.length)nx=sp.list.length;}
   if(q.more){const l=moreDue();if(l.length)nx=l.length;h+='<p class="mt'+(l.length?"":" grn")+'"><b>'+(l.length?"予定の日が来ている語　のこり "+l.length+"語":"予定の日が来ている語は、ぜんぶ終わった！")+'</b></p>';}
-  let per=q.stack||q.more?cfg("chunk"):LAP_CHUNK,unit="語";
-  if(q.focus){const fl=focusList(q.focus.sub,q.focus.kind,re);if(fl.length)nx=fl.length;per=re==="tokoton"?deepN():FOCUS_N;unit="問";}
+  let revL="";if(q.rev){const pk=revPick(q.rev,revN());if(pk.list.length){nx=pk.list.length;const pr=revParts(q.rev);const ra=pr.due.length+pr.mk.length;revL="続けて"+pk.list.length+"語（"+(ra?"予定の語・印つき のこり"+ra+"語":"前の範囲から")+"）";}}
+  let per=q.rev?revN():q.stack||q.more?cfg("chunk"):LAP_CHUNK,unit="語";
+  if(q.focus){const fl=focusList(q.focus.sub,q.focus.kind,re);if(fl.length)nx=fl.length;per=re==="tokoton"?(q.focus.kind==="cur"?deepN():deepK()):FOCUS_N;unit="問";}
   /* もう一度：集中練習は「まだあやしい問題をとことん」、とことん練習は「まだの問題を続ける」、ほかは「△と×をもう一度」 */
   const rLabel=re==="focus"?(left.length?"まだあやしい"+left.length+"問をとことん":""):re==="tokoton"?(left.length?"まだの"+left.length+"問を続ける":""):(missed.length?"△と×の"+missed.length+"語をもう一度":"");
   const home=q.cat?q.cat+"のメニューへ":"きょうの画面へ";
-  h+='<div class="row mt2">'+(nx?'<button class="btn primary" id="dNext">続けて'+Math.min(per,nx)+unit+'（のこり'+nx+unit+'）</button>':"")+(rLabel?'<button class="btn'+(nx?"":" primary")+'" id="dRetry">'+rLabel+'</button>':"")+'<button class="btn'+(rLabel||nx?"":" primary")+'" id="dHome">'+esc(home)+'</button></div></div>';
+  h+='<div class="row mt2">'+(nx?'<button class="btn primary" id="dNext">'+(revL||'続けて'+Math.min(per,nx)+unit+'（のこり'+nx+unit+'）')+'</button>':"")+(rLabel?'<button class="btn'+(nx?"":" primary")+'" id="dRetry">'+rLabel+'</button>':"")+'<button class="btn'+(rLabel||nx?"":" primary")+'" id="dHome">'+esc(home)+'</button></div></div>';
   el.innerHTML=h;
   const rt=$("#dRetry");if(rt)rt.addEventListener("click",()=>{if(fx)startDeep(q.focus.sub,q.focus.kind,left);else startSession(shuffle(missed.map(r=>r.id)),{src:q.src,title:q.title,kanji:q.kanji,lap:q.lap,stack:q.stack,more:q.more,re:q.re});});
-  const dn=$("#dNext");if(dn)dn.addEventListener("click",()=>{if(q.focus){if(re==="tokoton")startDeep(q.focus.sub,q.focus.kind);else startFocus(q.focus.sub,q.focus.kind);}else if(q.more)startMore();else if(q.stack)startStack();else startLap(q.lap);});
+  const dn=$("#dNext");if(dn)dn.addEventListener("click",()=>{if(q.focus){if(re==="tokoton")startDeep(q.focus.sub,q.focus.kind);else startFocus(q.focus.sub,q.focus.kind);}else if(q.rev)startReview(q.rev,revN());else if(q.more)startMore();else if(q.stack)startStack();else startLap(q.lap);});
   const db=$("#dBadge");if(db)db.addEventListener("click",()=>{view.sess=null;switchTab("badges");});
   $("#dHome").addEventListener("click",()=>{view.sess=null;view.cat=q.cat||null;switchTab("home");});
   playFx();}
@@ -1121,12 +1139,14 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
     +'<div class="lbl">社会のまとめ・記述の問題（理由を説明する問題など。回べつの「まとめ・記述」でいつでも練習できる）</div><div class="chips">'+[[0,"出さない"],[1,"1周・復習にも出す"]].map(x=>'<button class="chip'+(!!cfg("socDesc")===!!x[0]?" on":"")+'" data-socdesc="'+x[0]+'">'+x[1]+'</button>').join("")+'</div>'
     +'<p class="muted small">「塾のカードがある語だけ」が当面の設定。「すべての語」にすると、ドリルのカードの語も出る。</p>'
     +'<div class="lbl">新しい語の輪の目標（1日）</div><div class="chips">'+[10,20,30].map(n=>'<button class="chip'+(cfg("goalNew")===n?" on":"")+'" data-goal="'+n+'">'+n+'語</button>').join("")+'</div>'
-    +'<div class="lbl">1日の復習の目安（前の範囲もふくむ。復習の輪の目標）</div><div class="chips">'+[40,60,80,100].map(n=>'<button class="chip'+(cap===n?" on":"")+'" data-cap="'+n+'">'+n+'語</button>').join("")+'</div>'
-    +'<div class="lbl">積み上げの輪の目標（1日）</div><div class="chips">'+[5,10,15,20].map(n=>'<button class="chip'+(cfg("back")===n?" on":"")+'" data-back="'+n+'">'+n+'語</button>').join("")+'</div>'
+    +'<div class="lbl">1日の復習の目安（復習の輪の目標。こえて解いた分は積み上げの輪）</div><div class="chips">'+[40,60,80,100].map(n=>'<button class="chip'+(cap===n?" on":"")+'" data-cap="'+n+'">'+n+'語</button>').join("")+'</div>'
+    +'<div class="lbl">積み上げの輪の目標（1日。復習で目安をこえて解いた語）</div><div class="chips">'+[5,10,15,20].map(n=>'<button class="chip'+(cfg("back")===n?" on":"")+'" data-back="'+n+'">'+n+'語</button>').join("")+'</div>'
     +'<div class="lbl">お休み券（休んでも連続がとぎれない日数）</div><div class="chips">'+[0,1,2,3].map(n=>'<button class="chip'+(cfg("rest")===n?" on":"")+'" data-rest="'+n+'">'+(n?"月に"+n+"日":"なし")+'</button>').join("")+'</div>'
-    +'<div class="lbl">とことん練習の問題数（1回に出す数。出し直しは数に入らない）</div><div class="chips">'+[10,15,20].map(n=>'<button class="chip'+(deepN()===n?" on":"")+'" data-deep="'+n+'">'+n+'問</button>').join("")+'</div>'
+    +'<div class="lbl">復習の1回の語数（出し直しは数に入らない）</div><div class="chips">'+[10,20,30].map(n=>'<button class="chip'+(revN()===n?" on":"")+'" data-revn="'+n+'">'+n+'語</button>').join("")+'</div>'
+    +'<div class="lbl">とことん練習の問題数：通常回（いまの回）</div><div class="chips">'+[10,20,30].map(n=>'<button class="chip'+(deepN()===n?" on":"")+'" data-deep="'+n+'">'+n+'問</button>').join("")+'</div>'
+    +'<div class="lbl">とことん練習の問題数：組分け回</div><div class="chips">'+[20,30,40].map(n=>'<button class="chip'+(deepK()===n?" on":"")+'" data-deepk="'+n+'">'+n+'問</button>').join("")+'</div>'
     +'<div class="lbl">バッジの音</div><div class="chips">'+[[1,"あり"],[0,"なし"]].map(x=>'<button class="chip'+(!!cfg("sound")===!!x[0]?" on":"")+'" data-sound="'+x[0]+'">'+x[1]+'</button>').join("")+'</div>'
-    +'<div class="lbl">テストの日程（7日前から弱点を先に出す）</div><ul class="tests">'+testList().map(x=>'<li class="'+(x.days<0?"past":"")+'"><b>'+(new Date(x.ms).getFullYear())+'年'+testDateText(x)+'</b>　'+esc(x.name)+(x.days>=0?'　<span class="muted small">'+(x.days===0?"今日":"あと"+x.days+"日")+'</span>':'　<span class="muted small">終了</span>')+'</li>').join("")+'</ul>'
+    +'<div class="lbl">テストの日程（7日前から組分け回の練習を先に出す）</div><ul class="tests">'+testList().map(x=>'<li class="'+(x.days<0?"past":"")+'"><b>'+(new Date(x.ms).getFullYear())+'年'+testDateText(x)+'</b>　'+esc(x.name)+(x.days>=0?'　<span class="muted small">'+(x.days===0?"今日":"あと"+x.days+"日")+'</span>':'　<span class="muted small">終了</span>')+'</li>').join("")+'</ul>'
     +'<div class="lbl">ほかのテストの日を足す（なければ空のまま）</div><input type="date" id="nTest" value="'+esc(cfg("testDate"))+'"></div>';
   h+='<div class="panel mt" id="syBox"></div>';
   h+='<div class="panel mt" id="cdBox"></div>';
@@ -1146,6 +1166,8 @@ function renderNotes(){const el=$("#tab-notes");const nt=view.notes;
   el.querySelectorAll("[data-rest]").forEach(b=>b.addEventListener("click",()=>{setCfg("rest",Number(b.dataset.rest));if(checkBadges())save();render();}));
   el.querySelectorAll("[data-sound]").forEach(b=>b.addEventListener("click",()=>{setCfg("sound",b.dataset.sound==="1");if(cfg("sound"))sfx("ding");render();}));
   el.querySelectorAll("[data-deep]").forEach(b=>b.addEventListener("click",()=>{setCfg("deepN",Number(b.dataset.deep));renderNotesKeep();}));
+  el.querySelectorAll("[data-deepk]").forEach(b=>b.addEventListener("click",()=>{setCfg("deepK",Number(b.dataset.deepk));renderNotesKeep();}));
+  el.querySelectorAll("[data-revn]").forEach(b=>b.addEventListener("click",()=>{setCfg("revN",Number(b.dataset.revn));renderNotesKeep();}));
   el.querySelectorAll("[data-goal]").forEach(b=>b.addEventListener("click",()=>{setCfg("goalNew",Number(b.dataset.goal));render();}));
   el.querySelectorAll("[data-cap]").forEach(b=>b.addEventListener("click",()=>{setCfg("cap",Number(b.dataset.cap));render();}));
   el.querySelectorAll("[data-cardon]").forEach(b=>b.addEventListener("click",()=>{setCfg("cardOn",b.dataset.cardon==="1");renderNotesKeep();}));
@@ -1184,8 +1206,9 @@ function isAns(a){return !!ITEM[a[0]]&&a[3]!=="manual";}
 function rings(){const ts=todayStart();const r=curRound();let nDone=0;
   ITEMS.forEach(it=>{const s=ST[it.id];if(!s||s.firstT<ts||s.firstSrc==="manual")return;const ur=UNIT[it.u].round;if(ur===r)nDone++;});
   const nGoal=Math.min(cfg("goalNew"),nDone+newList().length);
-  const rp=reviewPlan();let rDone=0,rAll=0;SUBS.forEach(sub=>{rDone+=rp.per[sub].done;rAll+=rp.per[sub].alloc;});const rGoal=Math.min(rp.total,Math.max(rAll,rDone));
-  const bDone=stackToday();const bAvail=stackPool().list.length;const bGoal=Math.min(cfg("back"),bDone+bAvail);const bLabel="自分で";
+  const rp=reviewPlan();let rAll=0,rAvail=0;SUBS.forEach(sub=>{const x=rp.per[sub];rAll+=x.done;rAvail+=x.due.length+x.pool.length;});
+  const rGoal=Math.min(rp.total,rAll+rAvail),rDone=Math.min(rAll,rGoal);
+  const bDone=Math.max(0,rAll-rp.total);const bGoal=Math.min(cfg("back"),bDone+Math.max(0,rAvail-Math.max(0,rp.total-rAll)));const bLabel="目安をこえた復習";
   return [{k:"new",c:"ai",label:"新しい語",done:nDone,goal:nGoal},{k:"rev",c:"midori",label:"復習",done:rDone,goal:rGoal},{k:"back",c:"ki",label:"積み上げ",sub:bLabel,done:bDone,goal:bGoal}];}
 function ringsClosed(rg){return rg.every(x=>x.done>=x.goal)&&todayEntries().some(isAns);}
 function ringsSvg(rg,size){const R=[42,31,20];let h='<svg class="rings" viewBox="0 0 100 100" width="'+size+'" height="'+size+'" role="img" aria-label="'+esc(rg.map(x=>x.label+" "+x.done+"／"+x.goal).join("、"))+'">';
@@ -1886,7 +1909,7 @@ window.addEventListener("pagehide",()=>reconcile());
 window.addEventListener("pageshow",e=>{if(e.persisted)syncWake();});
 window.addEventListener("online",syncWake);window.addEventListener("offline",()=>paintSync());
 syncStart();
-window.__drill={unitItems,lapRound,descItems,moreDue,startMore,reviewPlan,pastPool,smpStatus,smpVisible,stackPool,stackToday,stackOpen,isHof,lapState,lapSafe,isLapEve,startLap,inLap,SECRETS,startSession,PAST_UNITS,setsForUnit,backOrder,dcards:{DCARDS,dcardHtml,unitDeck},cards:{CD,cardFor,openCardViewer,closeCardViewer,get ITEM_CARDS(){return ITEM_CARDS;},get CARD(){return CARD;}},todayMissed,arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,deckList,deckLeft,inDeck,applyItemFilter,CARD_IDS,get ITEMS(){return ITEMS;},ALL_ITEMS,mergeEntries,exportText,cfg,reviewQuota,focus:{fsrsAll,focusList,focusAt,focusR,focusRangeName,focusIn,startFocus,startDeep,reGap,reCleared,catMenu,kumiName,subRound,curUnsolved,SKIP:()=>SKIP}};
+window.__drill={revPick,revParts,startReview,lapGate,lap1Rounds,deepK,revN,unitItems,lapRound,descItems,moreDue,startMore,reviewPlan,pastPool,smpStatus,smpVisible,stackPool,stackToday,stackOpen,isHof,lapState,lapSafe,isLapEve,startLap,inLap,SECRETS,startSession,PAST_UNITS,setsForUnit,backOrder,dcards:{DCARDS,dcardHtml,unitDeck},cards:{CD,cardFor,openCardViewer,closeCardViewer,get ITEM_CARDS(){return ITEM_CARDS;},get CARD(){return CARD;}},todayMissed,arrange,isRnd,todaySteps,sync:{SY,reconcile,stateDiff,mergeState,syncStart},weeklyBests,openSheet,closeSheet,MOCKS,get view(){return view;},fx:{CE,openCele,playFx,badgeRank,get actx(){return actx;},get ids(){return fxIds;}},rings,badgeDefs,checkBadges,streakInfo,achievedFn,dayKey,nextTest,testList,backlogList,get S(){return S;},get ST(){return ST;},rebuild,applyEntry,newList,dueList,weakList,kanjiList,deckList,deckLeft,inDeck,applyItemFilter,CARD_IDS,get ITEMS(){return ITEMS;},ALL_ITEMS,mergeEntries,exportText,cfg,reviewQuota,focus:{fsrsAll,focusList,focusAt,focusR,focusRangeName,focusIn,startFocus,startDeep,reGap,reCleared,catMenu,kumiName,subRound,curUnsolved,SKIP:()=>SKIP}};
 })();
 
 </script>
