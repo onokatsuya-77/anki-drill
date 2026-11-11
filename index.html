@@ -492,7 +492,7 @@ const CONTENT = {"units":[{"id":"k4a","sub":"漢字","vol":"4年上","round":-3,
 <script>
 (function(){
 "use strict";
-const APP_VER="1.26.0";
+const APP_VER="1.26.1";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -524,13 +524,18 @@ function setCfg(k,v){S.cfg[k]=v;(S.meta.cfgT=S.meta.cfgT||{})[k]=Date.now();save
 /* ことばの語：当面は塾の暗記カードがある語だけを出す（設定で「すべての語」にもできる） */
 function applyItemFilter(){const only=!!cfg("wordCardOnly"),desc=!!cfg("socDesc");ITEMS=ALL_ITEMS.filter(it=>(desc||it.lv!==2)&&(!only||UNIT[it.u].sub!=="ことば"||CARD_IDS.has(it.id)));}
 function descItems(u){return ALL_ITEMS.filter(it=>it.u===u&&it.lv===2);}   // その単元の「まとめ・記述」の問題
-function load(){try{const raw=localStorage.getItem(KEY);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.log)){S.log=o.log;S.cfg=o.cfg||{};S.meta=o.meta||{};S.days=o.days||{};S.badges=o.badges||{};S.tests=Array.isArray(o.tests)?o.tests:[];}}}catch(e){storageOk=false;}}
+/* 取り消した時間帯：この間の記録（答え・印・バッジ）は、どの端末でも使わない。クラウドに残っていても取りこまない */
+const VOIDS=[[Date.UTC(2026,10,11,16,45),Date.UTC(2026,10,11,19,0)]];   // 11月12日 1:45〜4:00（1.26.0 にしたあと、ためしに触った分）
+var voidDropped=0;
+function isVoid(t){t=Number(t);return VOIDS.some(v=>t>=v[0]&&t<v[1]);}
+function dropVoid(){const n=S.log.length;S.log=S.log.filter(a=>!isVoid(a[2]));Object.keys(S.badges).forEach(k=>{if(isVoid(S.badges[k]))delete S.badges[k];});return n-S.log.length;}
+function load(){try{const raw=localStorage.getItem(KEY);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.log)){S.log=o.log;S.cfg=o.cfg||{};S.meta=o.meta||{};S.days=o.days||{};S.badges=o.badges||{};S.tests=Array.isArray(o.tests)?o.tests:[];voidDropped=dropVoid();}}}catch(e){storageOk=false;}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));storageOk=true;}catch(e){storageOk=false;}syncSoon();}
 function mapLegacyId(id){const m=/^q([1-5])-(\d\d)$/.exec(id);return m?("s5b0"+m[1]+"-0"+m[2]):id;}
 function mergeEntries(list,legacy){const seen=new Set(S.log.map(a=>a[0]+"|"+a[2]));let added=0;
   list.forEach(a=>{if(!Array.isArray(a)||a.length<3)return;let id=String(a[0]);const t=Number(a[2]);if(!t||!isFinite(t))return;let g;
     if(legacy){id=mapLegacyId(id);g=a[1]?2:0;}else{g=Number(a[1]);g=g===2?2:(g===1?1:0);}
-    const k=id+"|"+t;if(seen.has(k))return;seen.add(k);S.log.push([id,g,t,String(a[3]||"")]);added++;});
+    const k=id+"|"+t;if(seen.has(k)||isVoid(t))return;seen.add(k);S.log.push([id,g,t,String(a[3]||"")]);added++;});
   if(added)S.log.sort((x,y)=>x[2]-y[2]);return added;}
 function importLegacy(){try{const raw=localStorage.getItem(OLD_KEY);if(!raw)return 0;const o=JSON.parse(raw);if(!o||!Array.isArray(o.attempts))return 0;return mergeEntries(o.attempts,true);}catch(e){return 0;}}
 
@@ -1294,7 +1299,7 @@ function newBadgeBanner(id){const names=newBadgeNames();if(!names.length)return 
   return '<button class="banner bnew" id="'+id+'"><span>'+esc(text)+'</span><span class="go">見る</span></button>';}
 function mergeExtras(o){let ch=false;
   if(o.days&&typeof o.days==="object")Object.keys(o.days).forEach(k=>{if(/^\d{4}-\d\d-\d\d$/.test(k)&&o.days[k]&&!S.days[k]){S.days[k]=1;ch=true;}});
-  if(o.badges&&typeof o.badges==="object")Object.keys(o.badges).forEach(k=>{const t=Number(o.badges[k]);if(t&&isFinite(t)&&(!S.badges[k]||t<S.badges[k])){S.badges[k]=t;ch=true;}});
+  if(o.badges&&typeof o.badges==="object")Object.keys(o.badges).forEach(k=>{const t=Number(o.badges[k]);if(t&&isFinite(t)&&!isVoid(t)&&(!S.badges[k]||t<S.badges[k])){S.badges[k]=t;ch=true;}});
   const td=S.meta.testDel=S.meta.testDel||{};
   if(o.testDel&&typeof o.testDel==="object"&&!Array.isArray(o.testDel)){Object.keys(o.testDel).forEach(id=>{if(!td[id]){td[id]=Number(o.testDel[id])||1;ch=true;}});
     const n0=S.tests.length;S.tests=S.tests.filter(t=>!td[t.id]);if(S.tests.length!==n0)ch=true;}
@@ -1661,7 +1666,7 @@ function syncWatch(){if(!SY.be||!SY.user||SY.unsub)return;SY.err="";const uid=SY
   });paintSync();}
 function syncSoon(ms){if(!SY.user||!SY.unsub)return;clearTimeout(SY.timer);SY.timer=setTimeout(reconcile,ms==null?2500:ms);}
 function localOnly(){const out=[];for(const a of S.log){const x=entInfo(a);const c=SY.cl[x.m];if(!(c&&c.has(x.s)))out.push(x);}return out;}
-function cloudCount(){let n=0;Object.keys(SY.cl).forEach(m=>{n+=SY.cl[m].size;});return n;}
+function cloudCount(){let n=0;Object.keys(SY.cl).forEach(m=>{SY.cl[m].forEach(s=>{if(!isVoid(String(s).split(",")[2]))n++;});});return n;}
 /* クラウドの中身を、まとめてこの端末に取りこむ（この端末をはじめて合わせるとき） */
 function pullAll(){const fresh=[];Object.keys(SY.cl).forEach(m=>SY.cl[m].forEach(s=>{try{fresh.push(JSON.parse(s));}catch(e){}}));
   const n=mergeEntries(fresh,false);if(n)noteRecv(n);let ch=n>0;if(mergeState(SY.cs||{}))ch=true;if(ch)afterRemote();else save();}
@@ -1900,7 +1905,7 @@ rebuild();
 const badgeIntro=!S.meta.badgeFrom;
 if(badgeIntro)S.meta.badgeFrom=todayStart();
 const badgeCh=checkBadges();
-if(addedOld||firstRun||badgeIntro||badgeCh)save();
+if(addedOld||firstRun||badgeIntro||badgeCh||voidDropped)save();
 cardInit();
 render();
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!view.sess){if(checkBadges())save();render();}});
