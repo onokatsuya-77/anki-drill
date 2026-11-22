@@ -492,7 +492,7 @@ const CONTENT = {"units":[{"id":"k4a","sub":"漢字","vol":"4年上","round":-3,
 <script>
 (function(){
 "use strict";
-const APP_VER="1.28.1";
+const APP_VER="1.29.0";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const DAY=86400000;
@@ -1219,9 +1219,9 @@ function ringsClosed(rg){return rg.every(x=>x.done>=x.goal)&&todayEntries().some
 function ringsSvg(rg,size){const R=[42,31,20];let h='<svg class="rings" viewBox="0 0 100 100" width="'+size+'" height="'+size+'" role="img" aria-label="'+esc(rg.map(x=>x.label+" "+x.done+"／"+x.goal).join("、"))+'">';
   rg.forEach((x,i)=>{const c=2*Math.PI*R[i];const f=x.goal?Math.min(1,x.done/x.goal):1;
     h+='<circle class="trk" cx="50" cy="50" r="'+R[i]+'"/>';
-    if(f>0)h+='<circle class="p r-'+x.c+(x.goal?"":" none")+'" cx="50" cy="50" r="'+R[i]+'" stroke-dasharray="'+(c*f).toFixed(1)+' '+c.toFixed(1)+'"/>';});
+    if(f>0)h+='<circle class="p r-'+x.c+'" cx="50" cy="50" r="'+R[i]+'" stroke-dasharray="'+(c*f).toFixed(1)+' '+c.toFixed(1)+'"/>';});
   return h+'</svg>';}
-function ringsList(rg){return '<div class="ringlist">'+rg.map(x=>'<div><i class="dot '+x.c+'"></i>'+esc(x.label)+'　'+(x.goal?'<b>'+x.done+'</b> / '+x.goal+'語'+(x.done>=x.goal?'<span class="okm">○</span>':""):'<span class="muted">きょうはなし</span>')+'</div>').join("")+'</div>';}
+function ringsList(rg){return '<div class="ringlist">'+rg.map(x=>'<div><i class="dot '+x.c+'"></i>'+esc(x.label)+'　'+(x.goal?'<b>'+x.done+'</b> / '+x.goal+'語'+(x.done>=x.goal?'<span class="okm">○</span>':""):'<span class="muted">きょうはなし</span><span class="okm">○</span>')+'</div>').join("")+'</div>';}
 
 /* 輪がそろった日・連続・週 */
 function achievedFn(){const cnt={};S.log.forEach(a=>{if(isAns(a)){const k=dayKey(a[2]);cnt[k]=(cnt[k]||0)+1;}});const from=S.meta.badgeFrom||0;
